@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#183b34">
+  <meta name="description" content="Material, Zeit und weitere Kosten erfassen und faire Verkaufspreise für selbstgemachte Produkte berechnen.">
+  <title>Preisrechner · Lesezeichen-Hub</title>
+  <link rel="stylesheet" href="./styles.css">
+  <script type="module" src="./app.mjs"></script>
+</head>
+<body>
+  <div class="shell">
+    <header class="topbar">
+      <div class="brand"><span class="brand-mark" aria-hidden="true">◈</span><span>Preisrechner <small>für Selbstgemachtes</small></span></div>
+      <div class="top-actions">
+        <button class="button subtle" id="exampleButton" type="button">Beispiel ansehen</button>
+        <button class="button subtle" id="printButton" type="button">Drucken</button>
+      </div>
+    </header>
+
+    <main>
+      <section class="intro">
+        <div><p class="eyebrow">Einfach kalkulieren</p><h1>Was sollte dein Werkstück kosten?</h1><p>Trage ein, was du wirklich verbraucht hast. Der Rechner verteilt Einkaufskosten anteilig und zeigt dir Herstellungskosten und Verkaufspreise pro Stück.</p></div>
+        <div class="intro-note"><strong>Deine Daten bleiben bei dir.</strong><span>Entwürfe werden nur in diesem Browser gespeichert. Für ein Backup kannst du sie als Datei exportieren.</span></div>
+      </section>
+
+      <div class="workspace">
+        <div class="editor">
+          <section class="panel product-panel">
+            <div class="section-heading"><div><span class="step">01</span><h2>Dein Produkt</h2></div><span class="section-hint">Eine Rechnung kann auch mehrere gleiche Stücke enthalten.</span></div>
+            <div class="field-grid two">
+              <label class="field">Name des Produkts<input id="productName" type="text" maxlength="100" placeholder="z. B. gedrechselter Wichtel" autocomplete="off"></label>
+              <label class="field">Stückzahl aus diesem Durchgang<input id="batchSize" type="text" inputmode="numeric" value="1" aria-describedby="batchHelp"><small id="batchHelp">Alle Kosten unten gelten für diesen Durchgang.</small></label>
+            </div>
+          </section>
+
+          <section class="panel" id="materialsSection">
+            <div class="section-heading"><div><span class="step">02</span><h2>Material</h2></div><button class="button add" id="addMaterial" type="button">Material hinzufügen</button></div>
+            <p class="help">Beispiel: 4 m Holz kosten 20 €. Du verbrauchst 12 cm. Dann zählen 0,60 € fürs Produkt. Für jedes weitere Holzstück legst du eine eigene Zeile an.</p>
+            <div id="materialsList" class="item-list"></div>
+          </section>
+
+          <section class="panel">
+            <div class="section-heading"><div><span class="step">03</span><h2>Deine Zeit</h2></div></div>
+            <div class="field-grid two">
+              <label class="field">Arbeitszeit für alle Stücke <span class="unit-label">Minuten</span><input id="laborMinutes" type="text" inputmode="decimal" placeholder="z. B. 45"></label>
+              <label class="field">Wert deiner Zeit <span class="unit-label">€ pro Stunde</span><input id="hourlyRate" type="text" inputmode="decimal" value="20"><small>20 €/h ist nur ein Startwert. Passe ihn an dich an.</small></label>
+            </div>
+          </section>
+
+          <section class="panel">
+            <div class="section-heading"><div><span class="step">04</span><h2>Weitere Kosten</h2></div><button class="button add" id="addExtra" type="button">Kosten hinzufügen</button></div>
+            <p class="help">Zum Beispiel Verpackung, Farbe, Strom oder Maschinenverschleiß. Hier den Betrag für den ganzen Durchgang eintragen.</p>
+            <div id="extrasList" class="item-list"></div>
+            <div class="field-grid two padded-top">
+              <label class="field">Pauschale für Gemeinkosten <span class="unit-label">%</span><input id="overheadPercent" type="text" inputmode="decimal" value="10"><small>Für Dinge, die du nicht einzeln erfasst hast, etwa Werkzeug oder Werkstatt.</small></label>
+            </div>
+          </section>
+
+          <details class="panel details-panel" id="salesDetails">
+            <summary><span class="step">05</span><span><strong>Verkauf & Steuer</strong><small>Nur falls Gebühren oder Umsatzsteuer für dich anfallen</small></span><span class="chevron" aria-hidden="true"></span></summary>
+            <div class="field-grid three details-content">
+              <label class="field">Verkaufsgebühr <span class="unit-label">% vom Endpreis</span><input id="feePercent" type="text" inputmode="decimal" value="0"><small>Zum Beispiel eine Plattformprovision.</small></label>
+              <label class="field">Feste Gebühr <span class="unit-label">€ je Stück</span><input id="fixedFee" type="text" inputmode="decimal" value="0"></label>
+              <label class="field">Umsatzsteuer <span class="unit-label">%</span><input id="vatPercent" type="text" inputmode="decimal" value="0"><small>Nur eintragen, wenn du sie auf deinen Verkaufspreis aufschlägst.</small></label>
+            </div>
+          </details>
+        </div>
+
+        <aside class="results" aria-label="Ergebnis">
+          <section class="result-card" aria-live="polite">
+            <p class="eyebrow light">Dein Ergebnis pro Stück</p>
+            <div class="main-total"><span>Herstellungskosten</span><strong id="unitCost">0,00 €</strong></div>
+            <p class="result-explainer">Dieser Betrag deckt Material, Zeit und weitere eingetragene Kosten. Gewinn und Verkaufsgebühren sind noch nicht darin enthalten.</p>
+            <div id="resultAlerts" class="alerts"></div>
+            <div id="suggestions" class="suggestions"></div>
+            <p class="math-note" id="formulaNote"></p>
+          </section>
+          <section class="panel breakdown"><h2>So setzt sich der Preis zusammen</h2><div id="breakdownRows"></div><div class="breakdown-total"><span>Gesamt für <span id="batchCount">1</span> Stück</span><strong id="batchCost">0,00 €</strong></div></section>
+        </aside>
+      </div>
+
+      <section class="panel library" aria-labelledby="libraryTitle">
+        <div class="section-heading"><div><span class="step">06</span><h2 id="libraryTitle">Meine Kalkulationen</h2></div><span id="saveStatus" class="save-status" role="status"></span></div>
+        <p class="help">Dein aktueller Entwurf wird automatisch gespeichert. Mit „Kalkulation speichern“ legst du ihn in deiner Liste ab.</p>
+        <div class="library-actions"><button id="saveButton" type="button" class="button primary">Kalkulation speichern</button><button id="newButton" type="button" class="button subtle">Neuer Entwurf</button><button id="exportButton" type="button" class="button subtle">Backup exportieren</button><button id="importButton" type="button" class="button subtle">Backup importieren</button><input id="importFile" type="file" accept="application/json,.json" hidden></div>
+        <div id="savedList" class="saved-list"></div>
+      </section>
+    </main>
+    <footer>Preisvorschläge sind Rechenhilfen. Ob ein Preis zu deinem Markt und deiner Situation passt, entscheidest du.</footer>
+  </div>
+</body>
+</html>
