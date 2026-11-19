@@ -9,21 +9,32 @@ Im Hub unter **Hinzufügen → Lokales Modul** diesen Ordner auswählen. Die `in
 ## So funktioniert die Rechnung
 
 1. Produkt und Stückzahl angeben. Optional Kategorie, Beschreibung und Foto ergänzen. Eine wiederverwendbare Kalkulation kann als Vorlage markiert werden.
-2. Für jedes Material Einkaufspreis und eingekaufte Menge sowie den tatsächlichen Verbrauch eintragen. Meter, Zentimeter und Millimeter, Kilogramm und Gramm, Liter und Milliliter sowie Stück lassen sich kombinieren. Optionalen Verschnitt als Prozent des Verbrauchs angeben.
-3. Arbeitszeit für den gesamten Durchgang und gewünschten Stundenlohn eintragen.
-4. Weitere Kosten und optional eine Gemeinkostenpauschale ergänzen.
-5. Falls relevant, Verkaufsgebühr und Umsatzsteuer eintragen.
+2. Für jedes Material Einkaufspreis und eingekaufte Menge sowie den tatsächlichen Verbrauch eintragen. Verfügbar sind Länge (mm, cm, m), Gewicht (g, kg), Flüssigkeit (ml, Liter), Fläche (mm², cm², m²) und Stück. Optionalen Verschnitt als Prozent des Verbrauchs angeben.
+3. Für Rundholz oder Kanteln die Berechnungsart wechseln. Einkauf und Verbrauch werden aus Länge und Durchmesser bzw. Breite × Höhe als Volumen verglichen. Wenn der Querschnitt gleich bleibt, kann der ungenutzte Teil als Restlänge ins Lager gebucht werden. Bei unterschiedlichem Querschnitt ist eine eindeutige Restlänge nicht ableitbar. Hobel- oder Drechselverlust zusätzlich als Verschnitt erfassen.
+4. Arbeitszeit für den aktuellen Durchgang und gewünschten Stundenlohn eintragen. Einmalige Rüstzeit und Serienkosten werden bei größeren Stückzahlen verteilt. Die Serienübersicht rechnet laufende Kosten proportional zur Stückzahl hoch; sie ist eine Planung und bucht kein Material ab.
+5. Weitere Kosten und optional eine Gemeinkostenpauschale ergänzen.
+6. Verkaufskanal wählen und Gebühren bei Bedarf anpassen. Umsatzsteuer nur eintragen, wenn sie tatsächlich auf den Verkaufspreis aufgeschlagen wird.
 
-Die Herstellungskosten sind die Summe aus Material, Arbeitszeit, weiteren Kosten und Gemeinkosten, geteilt durch die Stückzahl. Der Mindestpreis deckt diese Kosten; der empfohlene Preis nutzt 30 % und der Premiumpreis 60 % Zielaufschlag. Alle drei berücksichtigen gegebenenfalls Verkaufsgebühren und Umsatzsteuer. Preise werden auf den nächsten vollen Cent aufgerundet. Die Prozentgebühr wird vom Endpreis berechnet; der angezeigte Preis ist inklusive der eingetragenen Umsatzsteuer. Es wird **nicht** automatisch entschieden, ob Umsatzsteuer anfällt.
+Die Herstellungskosten sind die Summe aus Material, Arbeitszeit, weiteren Kosten, einmaligen Serienkosten und Gemeinkosten, geteilt durch die Stückzahl. Der Mindestpreis deckt diese Kosten; der empfohlene Preis nutzt 30 % und der Premiumpreis 60 % Zielaufschlag. Alle drei berücksichtigen gegebenenfalls Verkaufsgebühren und Umsatzsteuer. Die Prozentgebühr wird vom Endpreis berechnet; der angezeigte Preis ist inklusive der eingetragenen Umsatzsteuer. Es wird **nicht** automatisch entschieden, ob Umsatzsteuer anfällt. Preisrundung lässt sich auf Cent, den nächsten ,90-Preis oder volle Euro einstellen; sie erfolgt immer nach oben.
 
 Bei jeder Preisstufe wird der nach allen angesetzten Kosten verbleibende Betrag gezeigt. **Kostenaufschlag** ist dieser Gewinn geteilt durch die Herstellungskosten. **Gewinnmarge** ist derselbe Gewinn geteilt durch den Verkaufserlös ohne Umsatzsteuer. Durch Cent-Rundung können die angezeigten tatsächlichen Prozentsätze geringfügig über dem Zielaufschlag liegen.
 
 Die Produktbibliothek lässt sich nach Text, Kategorie und Produkt/Vorlage filtern. Duplizieren übernimmt alle Angaben inklusive Foto und Material, öffnet einen neuen Entwurf und schützt das Original. Fotos werden im Browser auf höchstens 900 Pixel verkleinert.
 
-Entwürfe und gespeicherte Produkte liegen in der lokalen Browserdatenbank (`IndexedDB`). Bestehende Daten aus der früheren `localStorage`-Version werden beim Öffnen übernommen. Die Backup-Funktion exportiert und importiert JSON-Dateien einschließlich Fotos. Ein Import fügt gespeicherte Produkte hinzu und öffnet den importierten Entwurf. Browserdaten zu löschen entfernt auch die lokalen Produkte, wenn vorher kein Backup exportiert wurde.
+## Lager, Rabatt und Angebote
+
+„Reststück ins Lager buchen“ übernimmt eine berechenbare Restlänge mit ihrem anteiligen Materialwert. Lagerstücke können auch von Hand erfasst werden. „Ins Produkt übernehmen“ kopiert Menge und Wert in eine neue Materialzeile; nach Eingabe des Verbrauchs wird der Bestand über „Verbrauch aus Lager abbuchen“ reduziert. Die Lagerbuchung ist eine bewusste Aktion und passiert beim Speichern des Produkts nicht automatisch. Nach der Abbuchung sind die Mengen dieser Materialzeile gesperrt, damit Kalkulation und Lagerbuchung zusammenpassen; eine duplizierte Produktvariante ist wieder frei bearbeitbar.
+
+Der Rabattrechner zeigt den Preis nach Rabatt, den danach verbleibenden Betrag und den maximalen Rabatt in konservativen Schritten von 0,1 Prozentpunkten, ohne die Kostengrenze zu unterschreiten. Für Angebote den Dialog **Angebot / PDF** öffnen, Menge und Empfänger angeben und über den Druckdialog **Als PDF speichern** wählen. Der normale **Drucken**-Knopf druckt die Kalkulationsübersicht.
+
+Beim Speichern einer geänderten Kalkulation wird ein neuer Preisstand mit Materialkosten, Stückkosten und empfohlenem Verkaufspreis erfasst. Ohne Änderung an diesen Werten, der Stückzahl oder dem Verkaufskanal entsteht kein zusätzlicher Verlaufseintrag.
+
+Der Etsy-Kanal enthält als bearbeitbaren Ausgangswert 10,5 % plus 0,30 € für eine einzelne Bestellung mit deutschem Bankkonto (6,5 % Transaktion + 4 % Zahlungsabwicklung; geprüft am 19.11.2026). [Etsy-Gebühren](https://www.etsy.com/de/legal/fees/) und [Zahlungsbearbeitungsgebühren nach Land](https://help.etsy.com/hc/de/articles/115015628847-Was-sind-Zahlungsbearbeitungsgeb%C3%BChren-f%C3%BCr-den-Verkauf-auf-Etsy?segment=selling) können sich ändern. Einstellgebühren, Werbung, Versand, Steuern auf Etsy-Gebühren und abweichende Bestellgrößen sind individuell zu ergänzen. Für Markt, Onlineshop und Direktverkauf werden keine Gebühren geraten; die Felder sind frei einstellbar.
+
+Entwürfe, Produkte, Lager und Preisverlauf liegen in der lokalen Browserdatenbank (`IndexedDB`). Bestehende Daten aus der früheren `localStorage`-Version werden beim Öffnen übernommen. **JSON-Backup** exportiert und importiert sämtliche Daten einschließlich Fotos. **CSV** exportiert/importiert die Produktbibliothek mit Kalkulationsdaten, aber ohne Fotos, Lager und Preisverlauf. Ein Import fügt Einträge hinzu. Browserdaten zu löschen entfernt auch die lokalen Produkte, wenn vorher kein Backup exportiert wurde.
 
 ## Test
 
 ```text
-node --test tests/calculator.test.mjs
+node --test tests/*.test.mjs
 ```

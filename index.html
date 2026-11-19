@@ -52,7 +52,7 @@
 
           <section class="panel" id="materialsSection">
             <div class="section-heading"><div><span class="step">02</span><h2>Material</h2></div><button class="button add" id="addMaterial" type="button">Material hinzufügen</button></div>
-            <p class="help">Beispiel: 4 m Holz kosten 20 €. Du verbrauchst 12 cm. Dann zählen 0,60 € fürs Produkt. Für jedes weitere Holzstück legst du eine eigene Zeile an.</p>
+            <p class="help">Beispiel: 4 m Holz kosten 20 €. Du verbrauchst 12 cm. Dann zählen 0,60 € fürs Produkt. Für Rundholz und Kanteln kannst du Einkauf und Verbrauch auch über Maße und Volumen erfassen.</p>
             <div id="materialsList" class="item-list"></div>
           </section>
 
@@ -61,6 +61,10 @@
             <div class="field-grid two">
               <label class="field">Arbeitszeit für alle Stücke <span class="unit-label">Minuten</span><input id="laborMinutes" type="text" inputmode="decimal" placeholder="z. B. 45"></label>
               <label class="field">Wert deiner Zeit <span class="unit-label">€ pro Stunde</span><input id="hourlyRate" type="text" inputmode="decimal" value="20"><small>20 €/h ist nur ein Startwert. Passe ihn an dich an.</small></label>
+            </div>
+            <div class="field-grid two padded-top">
+              <label class="field">Einmalige Rüstzeit je Serie <span class="unit-label">Minuten</span><input id="setupMinutes" type="text" inputmode="decimal" value="0"><small>Zum Beispiel Werkzeug vorbereiten. Wird auf die Stückzahl verteilt.</small></label>
+              <label class="field">Einmalige Serienkosten <span class="unit-label">€</span><input id="setupCost" type="text" inputmode="decimal" value="0"><small>Zum Beispiel Schablone oder Maschinenstart.</small></label>
             </div>
           </section>
 
@@ -76,10 +80,13 @@
           <details class="panel details-panel" id="salesDetails">
             <summary><span class="step">05</span><span><strong>Verkauf & Steuer</strong><small>Nur falls Gebühren oder Umsatzsteuer für dich anfallen</small></span><span class="chevron" aria-hidden="true"></span></summary>
             <div class="field-grid three details-content">
+              <label class="field">Verkaufskanal<select id="salesChannel"><option value="direct">Direktverkauf</option><option value="etsy">Etsy (Deutschland)</option><option value="market">Markt</option><option value="shop">Onlineshop</option><option value="custom">Eigene Gebühren</option></select></label>
               <label class="field">Verkaufsgebühr <span class="unit-label">% vom Endpreis</span><input id="feePercent" type="text" inputmode="decimal" value="0"><small>Zum Beispiel eine Plattformprovision.</small></label>
               <label class="field">Feste Gebühr <span class="unit-label">€ je Stück</span><input id="fixedFee" type="text" inputmode="decimal" value="0"></label>
+              <label class="field">Kanalgebühr je Serie <span class="unit-label">€</span><input id="channelBatchFee" type="text" inputmode="decimal" value="0"><small>Zum Beispiel anteilige Marktstandkosten.</small></label>
               <label class="field">Umsatzsteuer <span class="unit-label">%</span><input id="vatPercent" type="text" inputmode="decimal" value="0"><small>Nur eintragen, wenn du sie auf deinen Verkaufspreis aufschlägst.</small></label>
             </div>
+            <p id="channelHint" class="help channel-hint"></p>
           </details>
         </div>
 
@@ -89,23 +96,49 @@
             <div class="main-total"><span>Herstellungskosten</span><strong id="unitCost">0,00 €</strong></div>
             <p class="result-explainer">Dieser Betrag deckt Material, Zeit und weitere eingetragene Kosten. Gewinn und Verkaufsgebühren sind noch nicht darin enthalten.</p>
             <div id="resultAlerts" class="alerts"></div>
+            <label class="field rounding-field">Preisrundung<select id="roundingMode"><option value="cent">Auf Cent aufrunden</option><option value="ninety">Auf ,90 € aufrunden</option><option value="euro">Auf volle Euro aufrunden</option></select></label>
             <div id="suggestions" class="suggestions"></div>
             <p class="math-note" id="formulaNote"></p>
           </section>
-          <section class="panel breakdown"><h2>So setzt sich der Preis zusammen</h2><div id="breakdownRows"></div><div class="breakdown-total"><span>Gesamt für <span id="batchCount">1</span> Stück</span><strong id="batchCost">0,00 €</strong></div></section>
+          <section class="panel breakdown"><h2>So setzt sich der Preis zusammen</h2><div id="breakdownRows"></div><div class="breakdown-total"><span>Herstellung für <span id="batchCount">1</span> Stück</span><strong id="batchCost">0,00 €</strong></div><div id="channelCostRow"></div></section>
         </aside>
       </div>
 
+      <section class="panel tools-panel" aria-labelledby="seriesTitle">
+        <div class="section-heading"><div><span class="step">06</span><h2 id="seriesTitle">Stückzahl & Serien</h2></div></div>
+        <p class="help">Die laufenden Kosten werden je Stück hochgerechnet; Rüstzeit und einmalige Kosten verteilen sich auf die Serie. So siehst du, wie sich 1, 5, 10 oder 50 gleiche Stücke rechnen.</p>
+        <div class="series-custom"><label class="field">Eigene Stückzahl<input id="customSeriesQuantity" type="text" inputmode="numeric" placeholder="z. B. 25"></label></div>
+        <div id="seriesTable" class="table-scroll"></div>
+      </section>
+
+      <section class="panel tools-panel" aria-labelledby="discountTitle">
+        <div class="section-heading"><div><span class="step">07</span><h2 id="discountTitle">Rabatt prüfen</h2></div></div>
+        <p class="help">Prüfe einen Rabatt auf deinen Verkaufspreis. Die Kostengrenze berücksichtigt auch die eingetragenen Gebühren und Umsatzsteuer.</p>
+        <div class="field-grid two"><label class="field">Ausgangspreis je Stück <span class="unit-label">€</span><input id="discountBasePrice" type="text" inputmode="decimal" placeholder="Empfohlener Preis"></label><label class="field">Geplanter Rabatt <span class="unit-label">%</span><input id="discountPercent" type="text" inputmode="decimal" value="0"></label></div>
+        <div id="discountResult" class="discount-result"></div>
+      </section>
+
+      <section class="panel tools-panel" aria-labelledby="inventoryTitle">
+        <div class="section-heading"><div><span class="step">08</span><h2 id="inventoryTitle">Reststücke & Lager</h2></div></div>
+        <p class="help">Buche ungenutztes Material aus einer Materialzeile mit Restlänge und anteiligem Wert ins Lager. Lagerstücke lassen sich anschließend in neue Kalkulationen übernehmen und bei tatsächlicher Verwendung abbuchen.</p>
+        <div class="field-grid three inventory-add"><label class="field">Bezeichnung<input id="stockName" type="text" maxlength="100" placeholder="z. B. Birkenrest"></label><label class="field">Länge oder Menge<input id="stockQuantity" type="text" inputmode="decimal" placeholder="z. B. 30"></label><label class="field">Einheit<select id="stockUnit"><option value="cm">cm</option><option value="m">m</option><option value="mm">mm</option><option value="st">Stück</option><option value="g">g</option><option value="kg">kg</option><option value="ml">ml</option><option value="l">Liter</option><option value="cm2">cm²</option><option value="m2">m²</option><option value="mm2">mm²</option></select></label><label class="field">Materialwert <span class="unit-label">€</span><input id="stockValue" type="text" inputmode="decimal" placeholder="z. B. 3,50"></label></div>
+        <button id="addStockButton" type="button" class="button add">Lagerstück hinzufügen</button><span id="stockStatus" class="inline-status" role="status"></span>
+        <div id="inventoryList" class="stock-list"></div>
+      </section>
+
       <section class="panel library" aria-labelledby="libraryTitle">
-        <div class="section-heading"><div><span class="step">06</span><h2 id="libraryTitle">Produktbibliothek & Vorlagen</h2></div><span id="saveStatus" class="save-status" role="status"></span></div>
+        <div class="section-heading"><div><span class="step">09</span><h2 id="libraryTitle">Produktbibliothek & Vorlagen</h2></div><span id="saveStatus" class="save-status" role="status"></span></div>
         <p class="help">Dein aktueller Entwurf wird automatisch gespeichert. Speichere fertige Produkte oder Vorlagen hier ab und dupliziere sie für neue Varianten.</p>
-        <div class="library-actions"><button id="saveButton" type="button" class="button primary">Produkt speichern</button><button id="newButton" type="button" class="button subtle">Neuer Entwurf</button><button id="exportButton" type="button" class="button subtle">Backup exportieren</button><button id="importButton" type="button" class="button subtle">Backup importieren</button><input id="importFile" type="file" accept="application/json,.json" hidden></div>
+        <div class="library-actions"><button id="saveButton" type="button" class="button primary">Produkt speichern</button><button id="newButton" type="button" class="button subtle">Neuer Entwurf</button><button id="offerButton" type="button" class="button subtle">Angebot / PDF</button><button id="exportButton" type="button" class="button subtle">JSON-Backup</button><button id="importButton" type="button" class="button subtle">JSON importieren</button><button id="exportCsvButton" type="button" class="button subtle">CSV exportieren</button><button id="importCsvButton" type="button" class="button subtle">CSV importieren</button><input id="importFile" type="file" accept="application/json,.json" hidden><input id="importCsvFile" type="file" accept="text/csv,.csv" hidden></div>
         <div class="library-filters"><label class="field">Suchen<input id="librarySearch" type="search" placeholder="Name, Beschreibung oder Kategorie"></label><label class="field">Kategorie<select id="libraryCategory"><option value="">Alle Kategorien</option></select></label><label class="field">Art<select id="libraryKind"><option value="all">Alle</option><option value="products">Produkte</option><option value="templates">Vorlagen</option></select></label></div>
         <p id="libraryCount" class="library-count"></p>
         <div id="savedList" class="saved-list"></div>
+        <div class="history-panel"><h3>Preisverlauf</h3><p class="help">Bei jeder geänderten gespeicherten Kalkulation wird ein neuer Preisstand festgehalten.</p><div id="historyContent"></div></div>
       </section>
     </main>
     <footer>Preisvorschläge sind Rechenhilfen. Ob ein Preis zu deinem Markt und deiner Situation passt, entscheidest du.</footer>
   </div>
+  <dialog id="offerDialog" class="offer-dialog"><form method="dialog" class="offer-controls"><h2>Einfaches Angebot</h2><label class="field">Dein Name oder Werkstattname<input id="offerSeller" type="text" maxlength="100" placeholder="z. B. Werkstatt Windberg"></label><label class="field">Für wen?<input id="offerCustomer" type="text" maxlength="100" placeholder="Name der Kundin oder des Kunden"></label><label class="field">Preisstufe<select id="offerTier"><option value="recommended">Empfohlener Verkaufspreis</option><option value="minimum">Mindestpreis</option><option value="premium">Premiumpreis</option></select></label><label class="field">Menge<input id="offerQuantity" type="text" inputmode="numeric" value="1"></label><label class="field">Zusätzlicher Text<textarea id="offerNotes" rows="3" placeholder="z. B. Lieferzeit oder Abholung"></textarea></label><div id="offerPreview" class="offer-preview"></div><div class="dialog-actions"><button id="printOfferButton" type="button" class="button primary">Drucken / als PDF speichern</button><button type="submit" class="button subtle">Schließen</button></div></form></dialog>
+  <section id="offerSheet" class="offer-sheet" aria-hidden="true"></section>
 </body>
 </html>
