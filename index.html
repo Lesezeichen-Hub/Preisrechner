@@ -3,10 +3,11 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#183b34">
+  <meta name="theme-color" content="#0c1519">
   <meta name="description" content="Material, Zeit und weitere Kosten erfassen und faire Verkaufspreise für selbstgemachte Produkte berechnen.">
   <title>Preisrechner · Lesezeichen-Hub</title>
   <link rel="stylesheet" href="./styles.css">
+  <link rel="stylesheet" href="./dark.css">
   <script type="module" src="./app.mjs"></script>
 </head>
 <body>
@@ -32,6 +33,20 @@
             <div class="field-grid two">
               <label class="field">Name des Produkts<input id="productName" type="text" maxlength="100" placeholder="z. B. gedrechselter Wichtel" autocomplete="off"></label>
               <label class="field">Stückzahl aus diesem Durchgang<input id="batchSize" type="text" inputmode="numeric" value="1" aria-describedby="batchHelp"><small id="batchHelp">Alle Kosten unten gelten für diesen Durchgang.</small></label>
+            </div>
+            <div class="product-details">
+              <div class="product-copy">
+                <label class="field">Kategorie<input id="category" type="text" maxlength="80" list="categorySuggestions" placeholder="z. B. Holzfiguren"><datalist id="categorySuggestions"></datalist></label>
+                <label class="field">Beschreibung<textarea id="description" maxlength="1500" rows="4" placeholder="Was macht dieses Stück besonders? Material, Größe, Variante …"></textarea></label>
+                <label class="template-choice"><input id="isTemplate" type="checkbox"><span><strong>Als Vorlage speichern</strong><small>Später kopieren und für neue Varianten anpassen.</small></span></label>
+              </div>
+              <div class="photo-area">
+                <span class="photo-title">Produktfoto</span>
+                <div id="photoPreview" class="photo-preview"><span aria-hidden="true">◇</span><small>Noch kein Foto</small></div>
+                <div class="photo-actions"><button id="photoButton" class="button subtle small" type="button">Foto auswählen</button><button id="removePhotoButton" class="button subtle small" type="button" hidden>Entfernen</button></div>
+                <input id="photoFile" type="file" accept="image/jpeg,image/png,image/webp,image/avif" hidden>
+                <small class="photo-help">Das Foto wird verkleinert und zusammen mit deinen Daten lokal gespeichert.</small>
+              </div>
             </div>
           </section>
 
@@ -82,9 +97,11 @@
       </div>
 
       <section class="panel library" aria-labelledby="libraryTitle">
-        <div class="section-heading"><div><span class="step">06</span><h2 id="libraryTitle">Meine Kalkulationen</h2></div><span id="saveStatus" class="save-status" role="status"></span></div>
-        <p class="help">Dein aktueller Entwurf wird automatisch gespeichert. Mit „Kalkulation speichern“ legst du ihn in deiner Liste ab.</p>
-        <div class="library-actions"><button id="saveButton" type="button" class="button primary">Kalkulation speichern</button><button id="newButton" type="button" class="button subtle">Neuer Entwurf</button><button id="exportButton" type="button" class="button subtle">Backup exportieren</button><button id="importButton" type="button" class="button subtle">Backup importieren</button><input id="importFile" type="file" accept="application/json,.json" hidden></div>
+        <div class="section-heading"><div><span class="step">06</span><h2 id="libraryTitle">Produktbibliothek & Vorlagen</h2></div><span id="saveStatus" class="save-status" role="status"></span></div>
+        <p class="help">Dein aktueller Entwurf wird automatisch gespeichert. Speichere fertige Produkte oder Vorlagen hier ab und dupliziere sie für neue Varianten.</p>
+        <div class="library-actions"><button id="saveButton" type="button" class="button primary">Produkt speichern</button><button id="newButton" type="button" class="button subtle">Neuer Entwurf</button><button id="exportButton" type="button" class="button subtle">Backup exportieren</button><button id="importButton" type="button" class="button subtle">Backup importieren</button><input id="importFile" type="file" accept="application/json,.json" hidden></div>
+        <div class="library-filters"><label class="field">Suchen<input id="librarySearch" type="search" placeholder="Name, Beschreibung oder Kategorie"></label><label class="field">Kategorie<select id="libraryCategory"><option value="">Alle Kategorien</option></select></label><label class="field">Art<select id="libraryKind"><option value="all">Alle</option><option value="products">Produkte</option><option value="templates">Vorlagen</option></select></label></div>
+        <p id="libraryCount" class="library-count"></p>
         <div id="savedList" class="saved-list"></div>
       </section>
     </main>

@@ -10,7 +10,8 @@ test('4 m wood is allocated by the 12 cm actually used, plus waste', () => {
   const result = calculate(product);
   assert.equal(result.errors.length, 0);
   assert.ok(Math.abs(result.materials - 0.66) < 1e-9);
-  assert.equal(result.suggestions[2].price, 0.86);
+  assert.equal(result.suggestions.length, 3);
+  assert.equal(result.suggestions[1].price, 0.86);
 });
 
 test('batch cost, labor, extras, overhead, fees and tax are included in the final price', () => {
@@ -21,10 +22,20 @@ test('batch cost, labor, extras, overhead, fees and tax are included in the fina
   assert.equal(result.errors.length, 0);
   assert.ok(Math.abs(result.batchCost - 24.2) < 1e-9);
   assert.ok(Math.abs(result.unitCost - 12.1) < 1e-9);
-  const standard = result.suggestions[2];
+  const standard = result.suggestions[1];
   const revenueAfterTaxAndFee = standard.price / 1.19 - standard.price * 0.1 - 0.3;
   assert.ok(revenueAfterTaxAndFee >= 12.1 * 1.3 - 1e-9);
   assert.ok(revenueAfterTaxAndFee < 12.1 * 1.3 + 0.01);
+  assert.ok(Math.abs(standard.profit - (revenueAfterTaxAndFee - result.unitCost)) < 1e-9);
+  assert.ok(Math.abs(standard.markupPercent - standard.profit / result.unitCost * 100) < 1e-9);
+  assert.ok(Math.abs(standard.marginPercent - standard.profit / standard.netRevenue * 100) < 1e-9);
+  assert.ok(standard.marginPercent < standard.markupPercent);
+  assert.deepEqual(result.suggestions.map(item => item.kind), ['minimum', 'recommended', 'premium']);
+  for (const suggestion of result.suggestions) {
+    assert.ok(suggestion.profit >= 0);
+    assert.ok(Math.abs(suggestion.netRevenue - suggestion.salesFees - result.unitCost - suggestion.profit) < 1e-9);
+    assert.ok(suggestion.markupPercent >= suggestion.marginPercent);
+  }
 });
 
 test('invalid and incompatible inputs prevent price suggestions', () => {

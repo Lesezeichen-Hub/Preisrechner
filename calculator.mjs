@@ -86,10 +86,19 @@ export function calculate(product) {
   if (denominator <= 0) errors.push('Steuer und Verkaufsgebühr sind zusammen zu hoch für eine Preisberechnung.');
 
   const suggestions = denominator > 0 && batchSize > 0
-    ? [0, 15, 30, 50].map(markup => {
-      const exactPrice = (unitCost * (1 + markup / 100) + fixedFee) / denominator;
+    ? [
+      { kind: 'minimum', targetMarkup: 0 },
+      { kind: 'recommended', targetMarkup: 30 },
+      { kind: 'premium', targetMarkup: 60 },
+    ].map(({ kind, targetMarkup }) => {
+      const exactPrice = (unitCost * (1 + targetMarkup / 100) + fixedFee) / denominator;
       const price = Math.ceil((exactPrice - 1e-10) * 100) / 100;
-      return { markup, price, profit: price * denominator - fixedFee - unitCost };
+      const netRevenue = price / (1 + vatPercent / 100);
+      const salesFees = price * feePercent / 100 + fixedFee;
+      const profit = Math.max(0, netRevenue - salesFees - unitCost);
+      const markupPercent = unitCost > 0 ? profit / unitCost * 100 : 0;
+      const marginPercent = netRevenue > 0 ? profit / netRevenue * 100 : 0;
+      return { kind, targetMarkup, price, profit, netRevenue, salesFees, markupPercent, marginPercent };
     })
     : [];
   if (batchCost === 0 && errors.length === 0) warnings.push('Trage mindestens Material, Arbeitszeit oder Zusatzkosten ein.');
