@@ -1,6 +1,6 @@
 import { calculate, calculateSeries, calculateDiscount, numberFromInput, UNITS } from './calculator.mjs';
 import { loadState, saveState } from './storage.mjs';
-import { toCsv, parseCsv } from './csv.mjs';
+import { toCsv, parseCsv, inventoryToCsv } from './csv.mjs';
 
 const euro = new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' });
 const percent = new Intl.NumberFormat('de-DE', { maximumFractionDigits: 1, minimumFractionDigits: 1 });
@@ -212,7 +212,8 @@ function renderDiscount() {
 }
 
 function renderInventory() {
-  $('inventoryList').innerHTML = inventory.length ? inventory.map(item => `<div class="stock-item" data-stock-id="${plain(item.id)}"><div><strong>${plain(item.name)}</strong><small>${percent.format(item.quantity)} ${plain(item.unit === 'st' ? 'Stück' : item.unit)} · Materialwert ${money(item.value)}${item.mode === 'roundwood' ? ` · Ø ${plain(item.diameter)} cm` : item.mode === 'squaredwood' ? ` · ${plain(item.width)} × ${plain(item.height)} cm` : ''}</small></div><div class="stock-actions"><button class="button small use-stock" type="button" ${item.quantity <= 0 ? 'disabled' : ''}>Ins Produkt übernehmen</button><button class="button small danger delete-stock" type="button">Löschen</button></div></div>`).join('') : '<div class="empty-list">Noch keine Reststücke im Lager.</div>';
+  $('inventoryList').innerHTML = inventory.length ? inventory.map(item => `<div class="stock-item" data-stock-id="${plain(item.id)}"><div><strong>${plain(item.name)}</strong><small>${percent.format(item.quantity)} ${plain(item.unit === 'st' ? 'Stück' : item.unit)} · Materialwert ${money(item.value)}${item.mode === 'roundwood' ? ` · Ø ${plain(item.diameter)} cm` : item.mode === 'squaredwood' ? ` · ${plain(item.width)} × ${plain(item.height)} cm` : ''}</small></div><div class="stock-actions"><button class="button small use-stock" type="button" ${item.quantity <= 0 ? 'disabled' : ''}>Ins Produkt übernehmen</button><button class="button small danger delete-stock" type="button">Löschen</button></div></div>`).join('') : '<div class="empty-list">Noch kein Material im Lager.</div>';
+  $('selectStock').innerHTML = '<option value="">Lagerartikel auswählen</option>' + inventory.filter(item => item.quantity > 0).map(item => `<option value="${plain(item.id)}">${plain(item.name)} · ${percent.format(item.quantity)} ${plain(item.unit === 'st' ? 'Stück' : item.unit)} · ${money(item.value)}</option>`).join('');
 }
 
 function renderHistory() {
@@ -357,19 +358,26 @@ $('addStockButton').addEventListener('click', () => {
   $('stockName').value = ''; $('stockQuantity').value = ''; $('stockValue').value = '';
   renderInventory(); persist(); $('stockStatus').textContent = 'Lagerstück hinzugefügt.';
 });
+function useStock(stock) {
+  if (!stock || stock.quantity <= 0) return;
+  const item = { id: uid(), name: stock.name, mode: stock.mode, purchasePrice: String(stock.value), wastePercent: '0', stockId: stock.id, stockBooked: false, restBookedId: null };
+  if (stock.mode === 'roundwood') Object.assign(item, { purchaseLength: String(stock.quantity), usedLength: '', purchaseDiameter: String(stock.diameter), usedDiameter: String(stock.diameter) });
+  else if (stock.mode === 'squaredwood') Object.assign(item, { purchaseLength: String(stock.quantity), usedLength: '', purchaseWidth: String(stock.width), usedWidth: String(stock.width), purchaseHeight: String(stock.height), usedHeight: String(stock.height) });
+  else Object.assign(item, { purchaseAmount: String(stock.quantity), purchaseUnit: stock.unit, usedAmount: '', usedUnit: stock.unit });
+  draft.materials.push(item); renderLists(); renderResult(); schedulePersist();
+  $('stockStatus').textContent = 'Lagerstück im Produkt übernommen. Verbrauch bitte nach Eingabe abbuchen.';
+}
+$('selectStock').addEventListener('change', event => {
+  useStock(inventory.find(item => item.id === event.target.value));
+  event.target.value = '';
+});
 $('inventoryList').addEventListener('click', event => {
   const card = event.target.closest('[data-stock-id]');
   if (!card) return;
   const stock = inventory.find(item => item.id === card.dataset.stockId);
   if (!stock) return;
   if (event.target.closest('.use-stock')) {
-    if (stock.quantity <= 0) return;
-    const item = { id: uid(), name: stock.name, mode: stock.mode, purchasePrice: String(stock.value), wastePercent: '0', stockId: stock.id, stockBooked: false, restBookedId: null };
-    if (stock.mode === 'roundwood') Object.assign(item, { purchaseLength: String(stock.quantity), usedLength: '', purchaseDiameter: String(stock.diameter), usedDiameter: String(stock.diameter) });
-    else if (stock.mode === 'squaredwood') Object.assign(item, { purchaseLength: String(stock.quantity), usedLength: '', purchaseWidth: String(stock.width), usedWidth: String(stock.width), purchaseHeight: String(stock.height), usedHeight: String(stock.height) });
-    else Object.assign(item, { purchaseAmount: String(stock.quantity), purchaseUnit: stock.unit, usedAmount: '', usedUnit: stock.unit });
-    draft.materials.push(item); renderLists(); renderResult(); schedulePersist();
-    $('stockStatus').textContent = 'Lagerstück im Produkt übernommen. Verbrauch bitte nach Eingabe abbuchen.';
+    useStock(stock);
     $('materialsSection').scrollIntoView({ behavior: 'smooth' });
   } else if (event.target.closest('.delete-stock')) {
     if (!confirm(`Lagerstück „${stock.name}“ dauerhaft löschen?`)) return;
@@ -465,7 +473,7 @@ $('importFile').addEventListener('change', async event => {
       const id = uid(); idMap.set(item.id, id);
       return { id, updatedAt: typeof item.updatedAt === 'string' && !Number.isNaN(Date.parse(item.updatedAt)) ? item.updatedAt : new Date().toISOString(), product: cleanProduct(item.product) };
     });
-    for (const entry of imported) { entry.product.id = entry.id; for (const item of entry.product.materials) { item.stockId = null; item.restBookedId = null; item.stockBooked = false; } }
+    for (const entry of imported) entry.product.id = entry.id;
     const stockMap = new Map();
     const importedStock = Array.isArray(data.inventory) ? data.inventory.filter(item => item && UNITS[item.unit] && Number.isFinite(Number(item.quantity)) && Number.isFinite(Number(item.value))).map(item => {
       const id = uid(); stockMap.set(item.id, id);
@@ -474,7 +482,9 @@ $('importFile').addEventListener('change', async event => {
     const importedHistory = Array.isArray(data.history) ? data.history.filter(item => idMap.has(item.productId) && Number.isFinite(item.unitCost)).map(item => ({ ...item, productId: idMap.get(item.productId) })) : [];
     saved.push(...imported); inventory.push(...importedStock); history.push(...importedHistory);
     draft = cleanProduct(data.draft); draft.id = null;
-    for (const item of draft.materials) { item.stockId = stockMap.get(item.stockId) || null; item.restBookedId = stockMap.get(item.restBookedId) || null; }
+    for (const product of [draft, ...imported.map(entry => entry.product)]) {
+      for (const item of product.materials) { item.stockId = stockMap.get(item.stockId) || null; item.restBookedId = stockMap.get(item.restBookedId) || null; }
+    }
     historyProductId = null;
     refresh(); persist();
     $('saveStatus').textContent = `${imported.length} Kalkulationen importiert`;
@@ -490,6 +500,9 @@ $('exportCsvButton').addEventListener('click', () => {
     rows.push([product.productName, product.category, product.description, product.isTemplate ? 'Ja' : 'Nein', product.batchSize, numberText(result.materials), numberText(result.unitCost), result.suggestions[1] ? numberText(result.suggestions[1].price) : '', JSON.stringify(copy)]);
   }
   downloadBlob(toCsv(rows), 'text/csv;charset=utf-8', `preisrechner-produkte-${new Date().toISOString().slice(0, 10)}.csv`);
+});
+$('exportStockCsvButton').addEventListener('click', () => {
+  downloadBlob(inventoryToCsv(inventory), 'text/csv;charset=utf-8', `preisrechner-lager-${new Date().toISOString().slice(0, 10)}.csv`);
 });
 $('importCsvButton').addEventListener('click', () => $('importCsvFile').click());
 $('importCsvFile').addEventListener('change', async event => {

@@ -52,6 +52,7 @@
 
           <section class="panel" id="materialsSection">
             <div class="section-heading"><div><span class="step">02</span><h2>Material</h2></div><button class="button add" id="addMaterial" type="button">Material hinzufügen</button></div>
+            <label class="field">Material aus Lager hinzufügen<select id="selectStock"><option value="">Lagerartikel auswählen</option></select></label>
             <p class="help">Beispiel: 4 m Holz kosten 20 €. Du verbrauchst 12 cm. Dann zählen 0,60 € fürs Produkt. Für Rundholz und Kanteln kannst du Einkauf und Verbrauch auch über Maße und Volumen erfassen.</p>
             <div id="materialsList" class="item-list"></div>
           </section>
@@ -119,17 +120,17 @@
       </section>
 
       <section class="panel tools-panel" aria-labelledby="inventoryTitle">
-        <div class="section-heading"><div><span class="step">08</span><h2 id="inventoryTitle">Reststücke & Lager</h2></div></div>
+        <div class="section-heading"><div><span class="step">08</span><h2 id="inventoryTitle">Materiallager</h2></div></div>
         <p class="help">Buche ungenutztes Material aus einer Materialzeile mit Restlänge und anteiligem Wert ins Lager. Lagerstücke lassen sich anschließend in neue Kalkulationen übernehmen und bei tatsächlicher Verwendung abbuchen.</p>
         <div class="field-grid three inventory-add"><label class="field">Bezeichnung<input id="stockName" type="text" maxlength="100" placeholder="z. B. Birkenrest"></label><label class="field">Länge oder Menge<input id="stockQuantity" type="text" inputmode="decimal" placeholder="z. B. 30"></label><label class="field">Einheit<select id="stockUnit"><option value="cm">cm</option><option value="m">m</option><option value="mm">mm</option><option value="st">Stück</option><option value="g">g</option><option value="kg">kg</option><option value="ml">ml</option><option value="l">Liter</option><option value="cm2">cm²</option><option value="m2">m²</option><option value="mm2">mm²</option></select></label><label class="field">Materialwert <span class="unit-label">€</span><input id="stockValue" type="text" inputmode="decimal" placeholder="z. B. 3,50"></label></div>
-        <button id="addStockButton" type="button" class="button add">Lagerstück hinzufügen</button><span id="stockStatus" class="inline-status" role="status"></span>
+        <button id="addStockButton" type="button" class="button add">Material ins Lager aufnehmen</button> <button id="exportStockCsvButton" type="button" class="button subtle">Lager als CSV exportieren</button><span id="stockStatus" class="inline-status" role="status"></span>
         <div id="inventoryList" class="stock-list"></div>
       </section>
 
       <section class="panel library" aria-labelledby="libraryTitle">
         <div class="section-heading"><div><span class="step">09</span><h2 id="libraryTitle">Produktbibliothek & Vorlagen</h2></div><span id="saveStatus" class="save-status" role="status"></span></div>
         <p class="help">Dein aktueller Entwurf wird automatisch gespeichert. Speichere fertige Produkte oder Vorlagen hier ab und dupliziere sie für neue Varianten.</p>
-        <div class="library-actions"><button id="saveButton" type="button" class="button primary">Produkt speichern</button><button id="newButton" type="button" class="button subtle">Neuer Entwurf</button><button id="offerButton" type="button" class="button subtle">Angebot / PDF</button><button id="exportButton" type="button" class="button subtle">JSON-Backup</button><button id="importButton" type="button" class="button subtle">JSON importieren</button><button id="exportCsvButton" type="button" class="button subtle">CSV exportieren</button><button id="importCsvButton" type="button" class="button subtle">CSV importieren</button><input id="importFile" type="file" accept="application/json,.json" hidden><input id="importCsvFile" type="file" accept="text/csv,.csv" hidden></div>
+        <div class="library-actions"><button id="saveButton" type="button" class="button primary">Produkt speichern</button><button id="newButton" type="button" class="button subtle">Neuer Entwurf</button><button id="offerButton" type="button" class="button subtle">Angebot / PDF</button><button id="exportButton" type="button" class="button subtle">Gesamtbackup (JSON)</button><button id="importButton" type="button" class="button subtle">JSON importieren</button><button id="exportCsvButton" type="button" class="button subtle">CSV exportieren</button><button id="importCsvButton" type="button" class="button subtle">CSV importieren</button><input id="importFile" type="file" accept="application/json,.json" hidden><input id="importCsvFile" type="file" accept="text/csv,.csv" hidden></div>
         <div class="library-filters"><label class="field">Suchen<input id="librarySearch" type="search" placeholder="Name, Beschreibung oder Kategorie"></label><label class="field">Kategorie<select id="libraryCategory"><option value="">Alle Kategorien</option></select></label><label class="field">Art<select id="libraryKind"><option value="all">Alle</option><option value="products">Produkte</option><option value="templates">Vorlagen</option></select></label></div>
         <p id="libraryCount" class="library-count"></p>
         <div id="savedList" class="saved-list"></div>

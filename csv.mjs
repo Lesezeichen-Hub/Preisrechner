@@ -7,6 +7,14 @@ export function toCsv(rows) {
   return '\uFEFF' + rows.map(row => row.map(csvCell).join(';')).join('\r\n') + '\r\n';
 }
 
+export function inventoryToCsv(inventory) {
+  const rows = [['Bezeichnung', 'Menge', 'Einheit', 'Materialwert EUR', 'Berechnungsart', 'Durchmesser cm', 'Breite cm', 'Höhe cm']];
+  for (const item of inventory) {
+    rows.push([item.name, String(item.quantity).replace('.', ','), item.unit, String(item.value).replace('.', ','), item.mode || 'quantity', item.diameter || '', item.width || '', item.height || '']);
+  }
+  return toCsv(rows);
+}
+
 export function parseCsv(text) {
   const source = String(text).replace(/^\uFEFF/, '');
   const delimiter = source.split(/\r?\n/, 1)[0].includes(';') ? ';' : ',';
