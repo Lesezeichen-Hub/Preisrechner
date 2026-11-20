@@ -422,6 +422,7 @@ $('saveButton').addEventListener('click', async () => {
 $('newButton').addEventListener('click', () => {
   if (hasUnsavedChanges() && !confirm('Einen neuen Entwurf beginnen? Nicht in der Bibliothek gespeicherte Änderungen gehen verloren.')) return;
   draft = emptyProduct(); refresh(); persist();
+  $('productName').focus();
 });
 
 $('savedList').addEventListener('click', event => {
@@ -432,11 +433,13 @@ $('savedList').addEventListener('click', event => {
   if (event.target.closest('.load-saved')) {
     if (hasUnsavedChanges() && !confirm('Nicht gespeicherte Änderungen verwerfen und dieses Produkt öffnen?')) return;
     draft = cleanProduct(entry.product); draft.id = entry.id; historyProductId = entry.id; refresh(); persist();
+    $('productEditor').scrollIntoView({ behavior: 'smooth' });
   } else if (event.target.closest('.copy-saved')) {
     if (hasUnsavedChanges() && !confirm('Nicht gespeicherte Änderungen verwerfen und eine neue Variante beginnen?')) return;
     draft = cleanProduct(entry.product); draft.id = null; draft.isTemplate = false; draft.productName = `${draft.productName || 'Produkt'} (Variante)`;
     for (const item of draft.materials) { item.stockId = null; item.stockBooked = false; item.restBookedId = null; }
     historyProductId = null; refresh(); persist();
+    $('productEditor').scrollIntoView({ behavior: 'smooth' });
   } else if (event.target.closest('.show-history')) {
     historyProductId = entry.id; renderHistory(); document.querySelector('.history-panel').scrollIntoView({ behavior: 'smooth' });
   } else if (event.target.closest('.delete-saved')) {

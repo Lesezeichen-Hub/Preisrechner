@@ -21,12 +21,18 @@
     </header>
 
     <main>
-      <section class="intro">
-        <div><p class="eyebrow">Einfach kalkulieren</p><h1>Was sollte dein Werkstück kosten?</h1><p>Trage ein, was du wirklich verbraucht hast. Der Rechner verteilt Einkaufskosten anteilig und zeigt dir Herstellungskosten und Verkaufspreise pro Stück.</p></div>
-        <div class="intro-note"><strong>Deine Daten bleiben bei dir.</strong><span>Entwürfe werden nur in diesem Browser gespeichert. Für ein Backup kannst du sie als Datei exportieren.</span></div>
+      <section class="library library-picker" aria-labelledby="libraryTitle">
+        <div class="library-heading">
+          <div><p class="eyebrow">Deine Kalkulationen</p><h1 id="libraryTitle">Produktbibliothek & Vorlagen</h1><span id="saveStatus" class="save-status" role="status"></span></div>
+          <button id="newButton" type="button" class="new-draft"><span class="new-draft-plus" aria-hidden="true">+</span><span>Neuer Entwurf</span></button>
+        </div>
+        <div class="library-filters"><label class="field">Suchen<input id="librarySearch" type="search" placeholder="Name, Beschreibung oder Kategorie"></label><label class="field">Kategorie<select id="libraryCategory"><option value="">Alle Kategorien</option></select></label><label class="field">Art<select id="libraryKind"><option value="all">Alle</option><option value="products">Produkte</option><option value="templates">Vorlagen</option></select></label></div>
+        <p id="libraryCount" class="library-count"></p>
+        <div id="savedList" class="saved-list"></div>
+        <div class="library-actions"><button id="saveButton" type="button" class="button primary">Produkt speichern</button><button id="offerButton" type="button" class="button subtle">Angebot / PDF</button><button id="exportButton" type="button" class="button subtle">Gesamtbackup (JSON)</button><button id="importButton" type="button" class="button subtle">JSON importieren</button><button id="exportCsvButton" type="button" class="button subtle">CSV exportieren</button><button id="importCsvButton" type="button" class="button subtle">CSV importieren</button><input id="importFile" type="file" accept="application/json,.json" hidden><input id="importCsvFile" type="file" accept="text/csv,.csv" hidden></div>
       </section>
 
-      <div class="workspace">
+      <div class="workspace" id="productEditor">
         <div class="editor">
           <section class="panel product-panel">
             <div class="section-heading"><div><span class="step">01</span><h2>Dein Produkt</h2></div><span class="section-hint">Eine Rechnung kann auch mehrere gleiche Stücke enthalten.</span></div>
@@ -127,13 +133,7 @@
         <div id="inventoryList" class="stock-list"></div>
       </section>
 
-      <section class="panel library" aria-labelledby="libraryTitle">
-        <div class="section-heading"><div><span class="step">09</span><h2 id="libraryTitle">Produktbibliothek & Vorlagen</h2></div><span id="saveStatus" class="save-status" role="status"></span></div>
-        <p class="help">Dein aktueller Entwurf wird automatisch gespeichert. Speichere fertige Produkte oder Vorlagen hier ab und dupliziere sie für neue Varianten.</p>
-        <div class="library-actions"><button id="saveButton" type="button" class="button primary">Produkt speichern</button><button id="newButton" type="button" class="button subtle">Neuer Entwurf</button><button id="offerButton" type="button" class="button subtle">Angebot / PDF</button><button id="exportButton" type="button" class="button subtle">Gesamtbackup (JSON)</button><button id="importButton" type="button" class="button subtle">JSON importieren</button><button id="exportCsvButton" type="button" class="button subtle">CSV exportieren</button><button id="importCsvButton" type="button" class="button subtle">CSV importieren</button><input id="importFile" type="file" accept="application/json,.json" hidden><input id="importCsvFile" type="file" accept="text/csv,.csv" hidden></div>
-        <div class="library-filters"><label class="field">Suchen<input id="librarySearch" type="search" placeholder="Name, Beschreibung oder Kategorie"></label><label class="field">Kategorie<select id="libraryCategory"><option value="">Alle Kategorien</option></select></label><label class="field">Art<select id="libraryKind"><option value="all">Alle</option><option value="products">Produkte</option><option value="templates">Vorlagen</option></select></label></div>
-        <p id="libraryCount" class="library-count"></p>
-        <div id="savedList" class="saved-list"></div>
+      <section class="panel library" aria-label="Preisverlauf">
         <div class="history-panel"><h3>Preisverlauf</h3><p class="help">Bei jeder geänderten gespeicherten Kalkulation wird ein neuer Preisstand festgehalten.</p><div id="historyContent"></div></div>
       </section>
     </main>
