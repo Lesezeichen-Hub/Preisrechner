@@ -31,6 +31,15 @@ export function numberFromInput(value) {
   return Number(normalized);
 }
 
+export function stockMatchesMaterial(item, stock) {
+  if (!stock || (item.mode || 'quantity') !== (stock.mode || 'quantity')) return false;
+  if (numberFromInput(item.purchasePrice) !== stock.value) return false;
+  if ((item.mode || 'quantity') === 'quantity') return item.purchaseUnit === stock.unit && numberFromInput(item.purchaseAmount) === stock.quantity;
+  if (stock.unit !== 'cm' || numberFromInput(item.purchaseLength) !== stock.quantity) return false;
+  if (item.mode === 'roundwood') return numberFromInput(item.purchaseDiameter) === numberFromInput(stock.diameter);
+  return numberFromInput(item.purchaseWidth) === numberFromInput(stock.width) && numberFromInput(item.purchaseHeight) === numberFromInput(stock.height);
+}
+
 function read(value, label, errors, { positive = false, max = Infinity } = {}) {
   const parsed = numberFromInput(value);
   if (!Number.isFinite(parsed) || (positive ? parsed <= 0 : parsed < 0) || parsed > max) {
@@ -150,13 +159,15 @@ export function calculate(product) {
   const overheadPercent = read(product.overheadPercent, 'Gemeinkosten', errors, { max: 1000 });
   const feePercent = read(product.feePercent, 'Verkaufsgebühr', errors, { max: 99 });
   const fixedFee = read(product.fixedFee, 'Feste Gebühr je Stück', errors);
+  const shippingCost = read(product.shippingCost, 'Versandkosten je Stück', errors);
+  const packagingCost = read(product.packagingCost, 'Verpackungskosten je Stück', errors);
   const vatPercent = read(product.vatPercent, 'Umsatzsteuer', errors, { max: 100 });
   const variableBatchCost = materials + labor + extras;
   const overhead = (variableBatchCost + fixedSetup) * overheadPercent / 100;
   const batchCost = variableBatchCost + fixedSetup + overhead;
   if (!Number.isFinite(batchCost)) errors.push('Die Gesamtkosten sind zu groß für eine verlässliche Berechnung.');
   const unitCost = batchSize > 0 ? batchCost / batchSize : 0;
-  const channelCostPerUnit = batchSize > 0 ? channelBatchFee / batchSize : 0;
+  const channelCostPerUnit = batchSize > 0 ? channelBatchFee / batchSize + shippingCost + packagingCost : 0;
   const denominator = 1 / (1 + vatPercent / 100) - feePercent / 100;
   if (denominator <= 0) errors.push('Steuer und Verkaufsgebühr sind zusammen zu hoch für eine Preisberechnung.');
 
@@ -166,7 +177,7 @@ export function calculate(product) {
   return {
     errors, warnings, materialDetails, materials, labor, extras, fixedSetup, variableBatchCost, overhead,
     batchCost, unitCost, channelBatchFee, channelCostPerUnit, batchSize, suggestions, hourlyRate, overheadPercent, roundingMode,
-    feePercent, fixedFee, vatPercent,
+    feePercent, fixedFee, vatPercent, shippingCost, packagingCost,
   };
 }
 
@@ -179,7 +190,7 @@ export function calculateSeries(product, quantities = [1, 5, 10, 50]) {
     const variable = base.variableBatchCost * count / base.batchSize;
     const batchCost = (variable + base.fixedSetup) * (1 + base.overheadPercent / 100);
     const unitCost = batchCost / count;
-    return { quantity: count, batchCost, unitCost, suggestions: priceSuggestions(unitCost, base.channelBatchFee / count, base.feePercent, base.fixedFee, base.vatPercent, base.roundingMode) };
+    return { quantity: count, batchCost, unitCost, suggestions: priceSuggestions(unitCost, base.channelBatchFee / count + base.shippingCost + base.packagingCost, base.feePercent, base.fixedFee, base.vatPercent, base.roundingMode) };
   }).filter(Boolean);
 }
 

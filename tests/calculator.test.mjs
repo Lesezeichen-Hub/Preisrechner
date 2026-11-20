@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { calculate, calculateSeries, calculateDiscount, numberFromInput, roundUpPrice } from '../calculator.mjs';
+import { calculate, calculateSeries, calculateDiscount, numberFromInput, roundUpPrice, stockMatchesMaterial } from '../calculator.mjs';
 
 const base = () => ({ batchSize: '1', materials: [], extras: [], laborMinutes: '0', hourlyRate: '20', overheadPercent: '0', feePercent: '0', fixedFee: '0', vatPercent: '0' });
 
@@ -100,4 +100,32 @@ test('market stand fee changes sale prices without changing manufacturing cost',
   assert.equal(result.suggestions[1].price, 36);
   assert.equal(result.suggestions[1].profit, 6);
   assert.equal(result.suggestions[1].markupPercent, 30);
+});
+
+test('shipping and packaging are included per sold unit in prices, series and discounts', () => {
+  const product = base();
+  product.batchSize = '2'; product.laborMinutes = '60';
+  product.shippingCost = '4'; product.packagingCost = '1,50';
+  const result = calculate(product);
+  assert.equal(result.unitCost, 10);
+  assert.equal(result.suggestions[0].price, 15.5);
+  assert.equal(result.suggestions[1].price, 18.5);
+  assert.equal(calculateSeries(product, [5])[0].suggestions[0].price, 15.5);
+  assert.equal(calculateDiscount(product, '15,50', '1').safe, false);
+  product.shippingCost = '-1';
+  assert.ok(calculate(product).errors.some(error => error.includes('Versandkosten')));
+});
+
+test('a material snapshot must match stock quantity, value, unit and wood dimensions', () => {
+  const stock = { mode: 'quantity', unit: 'kg', quantity: 2, value: 10 };
+  const item = { mode: 'quantity', purchaseUnit: 'kg', purchaseAmount: '2', purchasePrice: '10' };
+  assert.equal(stockMatchesMaterial(item, stock), true);
+  assert.equal(stockMatchesMaterial(item, { ...stock, unit: 'g' }), false);
+  assert.equal(stockMatchesMaterial(item, { ...stock, quantity: 3 }), false);
+  assert.equal(stockMatchesMaterial(item, { ...stock, value: 11 }), false);
+  const wood = { mode: 'roundwood', unit: 'cm', quantity: 50, value: 10, diameter: '4,5' };
+  const woodItem = { mode: 'roundwood', purchaseLength: '50', purchasePrice: '10', purchaseDiameter: '4,5' };
+  assert.equal(stockMatchesMaterial(woodItem, wood), true);
+  assert.equal(stockMatchesMaterial(woodItem, { ...wood, diameter: '5' }), false);
+  assert.equal(stockMatchesMaterial(woodItem, { ...wood, mode: 'quantity' }), false);
 });

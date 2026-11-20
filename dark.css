@@ -136,6 +136,8 @@ tbody th { color: #ebf4e9; }
 .stock-item strong, .stock-item small { display: block; }
 .stock-item small { color: #aec7b8; margin-top: 3px; }
 .stock-actions { display: flex; flex-wrap: wrap; gap: 7px; flex: none; }
+.stock-low { color: #ffcf91 !important; }
+#stockEditFields:not([hidden]), #stockRestockFields:not([hidden]) { display: grid; gap: 12px; }
 .button:disabled { opacity: .5; cursor: not-allowed; }
 .history-panel { margin-top: 28px; padding-top: 20px; border-top: 1px solid #365055; }
 .history-panel h3 { margin: 0 0 8px; font-size: 19px; }

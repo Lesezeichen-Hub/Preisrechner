@@ -1,21 +1,23 @@
-import { calculate, calculateSeries, calculateDiscount, numberFromInput, UNITS } from './calculator.mjs';
+import { calculate, calculateSeries, calculateDiscount, numberFromInput, stockMatchesMaterial, UNITS } from './calculator.mjs';
 import { loadState, saveState } from './storage.mjs';
 import { toCsv, parseCsv, inventoryToCsv } from './csv.mjs';
+import { mergeBackup } from './sync.mjs';
 
 const euro = new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' });
 const percent = new Intl.NumberFormat('de-DE', { maximumFractionDigits: 1, minimumFractionDigits: 1 });
+const quantityFormat = new Intl.NumberFormat('de-DE', { maximumSignificantDigits: 12 });
 const date = new Intl.DateTimeFormat('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' });
 const $ = id => document.getElementById(id);
 const uid = () => globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 const plain = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
 const money = value => euro.format(Number.isFinite(value) ? value : 0);
 const numberText = value => Number.isFinite(value) ? String(Math.round(value * 10000) / 10000).replace('.', ',') : '';
-const fields = ['productName', 'batchSize', 'category', 'description', 'laborMinutes', 'hourlyRate', 'setupMinutes', 'setupCost', 'overheadPercent', 'salesChannel', 'feePercent', 'fixedFee', 'channelBatchFee', 'vatPercent', 'roundingMode'];
+const fields = ['productName', 'batchSize', 'category', 'description', 'laborMinutes', 'hourlyRate', 'setupMinutes', 'setupCost', 'overheadPercent', 'salesChannel', 'feePercent', 'fixedFee', 'channelBatchFee', 'shippingCost', 'packagingCost', 'vatPercent', 'roundingMode'];
 const woodFields = ['purchaseLength', 'purchaseDiameter', 'purchaseWidth', 'purchaseHeight', 'usedLength', 'usedDiameter', 'usedWidth', 'usedHeight'];
 const validPhoto = value => typeof value === 'string' && value.length < 2_000_000 && /^data:image\/jpeg;base64,[a-z0-9+/=]+$/i.test(value);
 
 function emptyProduct() {
-  return { id: null, productName: '', category: '', description: '', photo: '', isTemplate: false, batchSize: '1', laborMinutes: '', hourlyRate: '20', setupMinutes: '0', setupCost: '0', overheadPercent: '10', salesChannel: 'direct', feePercent: '0', fixedFee: '0', channelBatchFee: '0', vatPercent: '0', roundingMode: 'cent', materials: [], extras: [] };
+  return { id: null, productName: '', category: '', description: '', photo: '', isTemplate: false, batchSize: '1', laborMinutes: '', hourlyRate: '20', setupMinutes: '0', setupCost: '0', overheadPercent: '10', salesChannel: 'direct', feePercent: '0', fixedFee: '0', channelBatchFee: '0', shippingCost: '0', packagingCost: '0', vatPercent: '0', roundingMode: 'cent', materials: [], extras: [] };
 }
 
 function cleanProduct(input) {
@@ -47,11 +49,17 @@ function cleanProduct(input) {
   return fresh;
 }
 
+function cleanStock(item) {
+  return { id: item.id, name: String(item.name ?? 'Lagerstück').slice(0, 100), unit: item.unit, quantity: Math.max(0, Number(item.quantity)), value: Math.max(0, Number(item.value)), minimum: Number.isFinite(Number(item.minimum)) ? Math.max(0, Number(item.minimum)) : 0, mode: ['quantity', 'roundwood', 'squaredwood'].includes(item.mode) ? item.mode : 'quantity', diameter: String(item.diameter ?? ''), width: String(item.width ?? ''), height: String(item.height ?? ''), at: typeof item.at === 'string' ? item.at : '' };
+}
+
 const stored = await loadState();
 let draft = cleanProduct(stored?.draft);
 let saved = Array.isArray(stored?.saved) ? stored.saved.filter(entry => entry && typeof entry.id === 'string' && entry.product).map(entry => ({ id: entry.id, updatedAt: entry.updatedAt, product: cleanProduct(entry.product) })) : [];
-let inventory = Array.isArray(stored?.inventory) ? stored.inventory.filter(item => item && typeof item.id === 'string' && UNITS[item.unit]).map(item => ({ ...item, quantity: Number(item.quantity) || 0, value: Number(item.value) || 0 })) : [];
+let inventory = Array.isArray(stored?.inventory) ? stored.inventory.filter(item => item && typeof item.id === 'string' && UNITS[item.unit] && Number.isFinite(Number(item.quantity)) && Number.isFinite(Number(item.value))).map(cleanStock) : [];
 let history = Array.isArray(stored?.history) ? stored.history.filter(item => item && typeof item.productId === 'string' && Number.isFinite(item.unitCost)) : [];
+let deletedProducts = Array.isArray(stored?.deletedProducts) ? stored.deletedProducts.filter(id => typeof id === 'string') : [];
+let deletedStock = Array.isArray(stored?.deletedStock) ? stored.deletedStock.filter(id => typeof id === 'string') : [];
 let historyProductId = draft.id;
 let saveTimer;
 let storageOK = true;
@@ -60,7 +68,7 @@ let writeQueue = Promise.resolve();
 function persist() {
   clearTimeout(saveTimer);
   $('saveStatus').textContent = 'Speichert …';
-  const snapshot = structuredClone({ version: 2, draft, saved, inventory, history });
+  const snapshot = structuredClone({ version: 3, draft, saved, inventory, history, deletedProducts, deletedStock });
   writeQueue = writeQueue.catch(() => {}).then(() => saveState(snapshot)).then(() => {
     storageOK = true;
     $('saveStatus').textContent = 'Lokal gespeichert';
@@ -173,7 +181,12 @@ function renderResult() {
   $('unitCost').textContent = result.errors.length ? '—' : money(result.unitCost);
   $('batchCount').textContent = String(result.batchSize || '–');
   $('batchCost').textContent = result.errors.length ? '—' : money(result.batchCost);
-  const stockWarnings = draft.materials.filter(item => item.stockId).map(item => `${item.name || 'Material'}: Aus dem Lager übernommen, aber noch nicht abgebucht.`);
+  const stockWarnings = draft.materials.filter(item => item.stockId).map(item => {
+    const stock = inventory.find(row => row.id === item.stockId);
+    if (!stock) return `${item.name || 'Material'}: Lagerartikel nicht mehr vorhanden. Bitte Materialzeile prüfen.`;
+    if (!stockMatchesMaterial(item, stock)) return `${item.name || 'Material'}: Lagerbestand geändert. Bitte Materialzeile entfernen und erneut aus dem Lager auswählen.`;
+    return `${item.name || 'Material'}: Aus dem Lager übernommen, aber noch nicht abgebucht.`;
+  });
   $('resultAlerts').innerHTML = [...result.errors.map(message => `<div class="alert error">${plain(message)}</div>`), ...result.warnings.concat(stockWarnings).map(message => `<div class="alert">${plain(message)}</div>`)].join('');
   $('suggestions').innerHTML = result.errors.length || result.batchCost === 0 ? '' : result.suggestions.map(suggestion => {
     const names = { minimum: 'Mindestpreis', recommended: 'Empfohlener Verkaufspreis', premium: 'Premiumpreis' };
@@ -181,7 +194,7 @@ function renderResult() {
   }).join('');
   $('formulaNote').textContent = result.errors.length || result.batchCost === 0 ? '' : `Mindestpreis deckt deine angesetzten Kosten; Empfehlung und Premium nutzen 30 % bzw. 60 % Zielaufschlag auf die Herstellungskosten. Kostenaufschlag = Gewinn ÷ Herstellungskosten. Gewinnmarge = Gewinn ÷ Verkaufserlös ohne Umsatzsteuer. Der Gewinnbetrag berücksichtigt die eingetragenen Kosten, Gebühren und Umsatzsteuer. Preise werden nach deiner Rundungseinstellung aufgerundet.`;
   $('breakdownRows').innerHTML = [['Material', result.materials], ['Arbeitszeit', result.labor], ['Weitere Kosten', result.extras], ['Rüstzeit & Serienkosten', result.fixedSetup], ['Gemeinkosten', result.overhead]].map(([label, value]) => `<div class="breakdown-row"><span>${label}</span><strong>${money(value)}</strong></div>`).join('');
-  $('channelCostRow').innerHTML = result.channelBatchFee ? `<div class="breakdown-row channel-cost-row"><span>Zusätzlich: Kanalgebühr je Serie</span><strong>${money(result.channelBatchFee)}</strong></div>` : '';
+  $('channelCostRow').innerHTML = (result.channelBatchFee ? `<div class="breakdown-row channel-cost-row"><span>Zusätzlich: Kanalgebühr je Serie</span><strong>${money(result.channelBatchFee)}</strong></div>` : '') + (result.shippingCost || result.packagingCost ? `<div class="breakdown-row channel-cost-row"><span>Zusätzlich: Versand & Verpackung je Stück</span><strong>${money(result.shippingCost + result.packagingCost)}</strong></div>` : '');
   for (const item of draft.materials) {
     const el = document.querySelector(`[data-cost="${CSS.escape(item.id)}"]`);
     const detail = result.materialDetails.find(detail => detail.id === item.id);
@@ -212,8 +225,8 @@ function renderDiscount() {
 }
 
 function renderInventory() {
-  $('inventoryList').innerHTML = inventory.length ? inventory.map(item => `<div class="stock-item" data-stock-id="${plain(item.id)}"><div><strong>${plain(item.name)}</strong><small>${percent.format(item.quantity)} ${plain(item.unit === 'st' ? 'Stück' : item.unit)} · Materialwert ${money(item.value)}${item.mode === 'roundwood' ? ` · Ø ${plain(item.diameter)} cm` : item.mode === 'squaredwood' ? ` · ${plain(item.width)} × ${plain(item.height)} cm` : ''}</small></div><div class="stock-actions"><button class="button small use-stock" type="button" ${item.quantity <= 0 ? 'disabled' : ''}>Ins Produkt übernehmen</button><button class="button small danger delete-stock" type="button">Löschen</button></div></div>`).join('') : '<div class="empty-list">Noch kein Material im Lager.</div>';
-  $('selectStock').innerHTML = '<option value="">Lagerartikel auswählen</option>' + inventory.filter(item => item.quantity > 0).map(item => `<option value="${plain(item.id)}">${plain(item.name)} · ${percent.format(item.quantity)} ${plain(item.unit === 'st' ? 'Stück' : item.unit)} · ${money(item.value)}</option>`).join('');
+  $('inventoryList').innerHTML = inventory.length ? inventory.map(item => `<div class="stock-item" data-stock-id="${plain(item.id)}"><div><strong>${plain(item.name)}</strong><small>${quantityFormat.format(item.quantity)} ${plain(item.unit === 'st' ? 'Stück' : item.unit)} · Materialwert ${money(item.value)}${item.mode === 'roundwood' ? ` · Ø ${plain(item.diameter)} cm` : item.mode === 'squaredwood' ? ` · ${plain(item.width)} × ${plain(item.height)} cm` : ''}</small>${item.minimum > 0 ? `<small class="${item.quantity <= item.minimum ? 'stock-low' : ''}">Mindestbestand: ${quantityFormat.format(item.minimum)} ${plain(item.unit === 'st' ? 'Stück' : item.unit)}${item.quantity <= item.minimum ? ' · Nachbestellen' : ''}</small>` : ''}</div><div class="stock-actions"><button class="button small use-stock" type="button" ${item.quantity <= 0 ? 'disabled' : ''}>Ins Produkt übernehmen</button><button class="button small edit-stock" type="button">Bearbeiten</button><button class="button small restock-stock" type="button">Auffüllen</button><button class="button small danger delete-stock" type="button">Löschen</button></div></div>`).join('') : '<div class="empty-list">Noch kein Material im Lager.</div>';
+  $('selectStock').innerHTML = '<option value="">Lagerartikel auswählen</option>' + inventory.filter(item => item.quantity > 0).map(item => `<option value="${plain(item.id)}">${plain(item.name)} · ${quantityFormat.format(item.quantity)} ${plain(item.unit === 'st' ? 'Stück' : item.unit)} · ${money(item.value)}</option>`).join('');
 }
 
 function renderHistory() {
@@ -328,6 +341,7 @@ function debitStock(materialId) {
   const result = calculate(draft);
   const detail = result.materialDetails.find(row => row.id === materialId);
   if (!item || !stock || !detail || result.errors.length) { $('stockStatus').textContent = 'Bitte zuerst gültige Verbrauchsmaße eingeben.'; return; }
+  if (!stockMatchesMaterial(item, stock)) { $('stockStatus').textContent = 'Der Lagerbestand wurde geändert. Bitte Materialzeile entfernen und erneut aus dem Lager auswählen.'; return; }
   const used = item.mode === 'quantity' ? detail.consumedBase / UNITS[stock.unit].factor : numberFromInput(item.usedLength) * (1 + numberFromInput(item.wastePercent) / 100);
   if (!Number.isFinite(used) || used <= 0 || used > stock.quantity + 1e-9) { $('stockStatus').textContent = 'Verbrauch muss größer als 0 sein und darf den Lagerbestand nicht überschreiten.'; return; }
   if (item.mode === 'roundwood' && item.usedDiameter !== item.purchaseDiameter || item.mode === 'squaredwood' && (item.usedWidth !== item.purchaseWidth || item.usedHeight !== item.purchaseHeight)) { $('stockStatus').textContent = 'Beim Lagerverbrauch muss der Holzquerschnitt gleich bleiben. Für kleinere Querschnitte bitte eine eigene Materialzeile nutzen.'; return; }
@@ -353,9 +367,10 @@ $('addStockButton').addEventListener('click', () => {
   const name = $('stockName').value.trim();
   const quantity = numberFromInput($('stockQuantity').value);
   const value = numberFromInput($('stockValue').value);
-  if (!name || !Number.isFinite(quantity) || quantity <= 0 || !Number.isFinite(value) || value < 0) { $('stockStatus').textContent = 'Bitte Bezeichnung, Menge größer als 0 und Materialwert ab 0 eingeben.'; return; }
-  inventory.push({ id: uid(), name, quantity, unit: $('stockUnit').value, value, mode: 'quantity', at: new Date().toISOString() });
-  $('stockName').value = ''; $('stockQuantity').value = ''; $('stockValue').value = '';
+  const minimum = numberFromInput($('stockMinimum').value);
+  if (!name || !Number.isFinite(quantity) || quantity <= 0 || !Number.isFinite(value) || value < 0 || !Number.isFinite(minimum) || minimum < 0) { $('stockStatus').textContent = 'Bitte Bezeichnung, Menge größer als 0 sowie gültigen Materialwert und Mindestbestand eingeben.'; return; }
+  inventory.push({ id: uid(), name, quantity, unit: $('stockUnit').value, value, minimum, mode: 'quantity', at: new Date().toISOString() });
+  $('stockName').value = ''; $('stockQuantity').value = ''; $('stockValue').value = ''; $('stockMinimum').value = '0';
   renderInventory(); persist(); $('stockStatus').textContent = 'Lagerstück hinzugefügt.';
 });
 function useStock(stock) {
@@ -371,6 +386,34 @@ $('selectStock').addEventListener('change', event => {
   useStock(inventory.find(item => item.id === event.target.value));
   event.target.value = '';
 });
+let stockDialogId = null;
+let stockDialogMode = '';
+function openStockDialog(stock, mode) {
+  stockDialogId = stock.id; stockDialogMode = mode;
+  $('stockDialogTitle').textContent = mode === 'edit' ? 'Material bearbeiten' : 'Material auffüllen';
+  $('stockDialogUnit').textContent = `${stock.name} · Einheit: ${stock.unit === 'st' ? 'Stück' : stock.unit}${stock.mode !== 'quantity' ? ' · gleicher Holzquerschnitt' : ''}`;
+  $('stockEditFields').hidden = mode !== 'edit'; $('stockRestockFields').hidden = mode !== 'restock';
+  $('editStockName').value = stock.name; $('editStockQuantity').value = String(stock.quantity); $('editStockValue').value = String(stock.value); $('editStockMinimum').value = String(stock.minimum || 0);
+  $('restockQuantity').value = ''; $('restockValue').value = ''; $('stockDialogStatus').textContent = '';
+  $('stockDialog').showModal();
+}
+$('cancelStockDialog').addEventListener('click', () => $('stockDialog').close());
+$('stockForm').addEventListener('submit', event => {
+  event.preventDefault();
+  const stock = inventory.find(item => item.id === stockDialogId);
+  if (!stock) { $('stockDialog').close(); return; }
+  const editing = stockDialogMode === 'edit';
+  const name = editing ? $('editStockName').value.trim() : stock.name;
+  const quantity = numberFromInput($(editing ? 'editStockQuantity' : 'restockQuantity').value);
+  const value = numberFromInput($(editing ? 'editStockValue' : 'restockValue').value);
+  const minimum = editing ? numberFromInput($('editStockMinimum').value) : stock.minimum || 0;
+  if (!name || !Number.isFinite(quantity) || quantity < 0 || (!editing && quantity === 0) || !Number.isFinite(value) || value < 0 || !Number.isFinite(minimum) || minimum < 0 || (editing && quantity === 0 && value !== 0)) { $('stockDialogStatus').textContent = 'Bitte gültige Werte eingeben. Ein leerer Bestand muss den Wert 0 haben.'; return; }
+  const nextQuantity = editing ? quantity : stock.quantity + quantity;
+  const nextValue = editing ? value : stock.value + value;
+  if (!Number.isFinite(nextQuantity) || !Number.isFinite(nextValue)) { $('stockDialogStatus').textContent = 'Menge oder Wert sind zu groß.'; return; }
+  stock.name = name; stock.quantity = nextQuantity; stock.value = nextValue; stock.minimum = minimum;
+  $('stockDialog').close(); renderInventory(); renderResult(); persist(); $('stockStatus').textContent = editing ? 'Lagerbestand aktualisiert.' : 'Material aufgefüllt.';
+});
 $('inventoryList').addEventListener('click', event => {
   const card = event.target.closest('[data-stock-id]');
   if (!card) return;
@@ -379,9 +422,14 @@ $('inventoryList').addEventListener('click', event => {
   if (event.target.closest('.use-stock')) {
     useStock(stock);
     $('materialsSection').scrollIntoView({ behavior: 'smooth' });
+  } else if (event.target.closest('.edit-stock')) {
+    openStockDialog(stock, 'edit');
+  } else if (event.target.closest('.restock-stock')) {
+    openStockDialog(stock, 'restock');
   } else if (event.target.closest('.delete-stock')) {
     if (!confirm(`Lagerstück „${stock.name}“ dauerhaft löschen?`)) return;
     inventory = inventory.filter(item => item.id !== stock.id);
+    if (!deletedStock.includes(stock.id)) deletedStock.push(stock.id);
     for (const item of draft.materials) {
       if (item.stockId === stock.id) item.stockId = null;
       if (item.restBookedId === stock.id) item.restBookedId = null;
@@ -445,6 +493,7 @@ $('savedList').addEventListener('click', event => {
   } else if (event.target.closest('.delete-saved')) {
     if (!confirm(`„${entry.product.productName || 'Unbenanntes Produkt'}“ dauerhaft aus der Liste löschen?`)) return;
     saved = saved.filter(item => item.id !== entry.id);
+    if (!deletedProducts.includes(entry.id)) deletedProducts.push(entry.id);
     history = history.filter(item => item.productId !== entry.id);
     if (draft.id === entry.id) draft.id = null;
     if (historyProductId === entry.id) historyProductId = null;
@@ -460,9 +509,20 @@ function downloadBlob(data, type, filename) {
 
 $('exportButton').addEventListener('click', async () => {
   await persist();
-  downloadBlob(JSON.stringify({ format: 'preisrechner', version: 2, exportedAt: new Date().toISOString(), draft, saved, inventory, history }, null, 2), 'application/json', `preisrechner-backup-${new Date().toISOString().slice(0, 10)}.json`);
+  downloadBlob(JSON.stringify({ format: 'preisrechner', version: 3, exportedAt: new Date().toISOString(), draft, saved, inventory, history, deletedProducts, deletedStock }, null, 2), 'application/json', `preisrechner-backup-${new Date().toISOString().slice(0, 10)}.json`);
 });
 $('importButton').addEventListener('click', () => $('importFile').click());
+function resolveSyncConflict(conflict) {
+  if (conflict.kind === 'draft') return confirm('Der importierte Entwurf unterscheidet sich vom aktuellen Entwurf.\n\nOK: importierten Entwurf übernehmen.\nAbbrechen: aktuellen Entwurf behalten.');
+  const label = conflict.kind === 'stock' ? 'Lagerartikel' : 'Produkt';
+  const describe = item => {
+    if (!item) return 'gelöscht';
+    if (conflict.kind === 'stock') return `${item.name}: ${item.quantity} ${item.unit}, ${money(item.value)}, Mindestbestand ${item.minimum || 0}`;
+    const result = calculate(item.product);
+    return `${item.product.productName || 'Unbenannt'}${item.updatedAt ? ` (${item.updatedAt})` : ''}\n  ${item.product.category || 'Ohne Kategorie'} · ${item.product.materials.length} Materialien · ${result.errors.length ? 'Kalkulation unvollständig' : `Herstellung ${money(result.unitCost)} / Empfehlung ${money(result.suggestions[1]?.price)}`}`;
+  };
+  return confirm(`${label} unterscheidet sich zwischen den Instanzen.\n\nHier: ${describe(conflict.local)}\nImport: ${describe(conflict.incoming)}\n\nOK: Import übernehmen.\nAbbrechen: hiesigen Stand behalten.`);
+}
 $('importFile').addEventListener('change', async event => {
   const file = event.target.files?.[0];
   event.target.value = '';
@@ -470,27 +530,32 @@ $('importFile').addEventListener('change', async event => {
   try {
     if (file.size > 50_000_000) throw new Error('Die Datei ist zu groß.');
     const data = JSON.parse(await file.text());
-    if (data.format !== 'preisrechner' || ![1, 2].includes(data.version) || !Array.isArray(data.saved) || !data.draft) throw new Error('Das ist kein gültiges Preisrechner-Backup.');
-    const idMap = new Map();
-    const imported = data.saved.slice(0, 500).filter(item => item && typeof item === 'object' && item.product).map(item => {
-      const id = uid(); idMap.set(item.id, id);
-      return { id, updatedAt: typeof item.updatedAt === 'string' && !Number.isNaN(Date.parse(item.updatedAt)) ? item.updatedAt : new Date().toISOString(), product: cleanProduct(item.product) };
+    if (data.format !== 'preisrechner' || ![1, 2, 3].includes(data.version) || !Array.isArray(data.saved) || !data.draft || (data.inventory !== undefined && !Array.isArray(data.inventory))) throw new Error('Das ist kein gültiges Preisrechner-Backup.');
+    const imported = data.saved.map(item => {
+      if (!item || typeof item.id !== 'string' || !item.id || !item.product || typeof item.product !== 'object') throw new Error('Das Backup enthält ein ungültiges Produkt.');
+      const product = cleanProduct(item.product); product.id = item.id;
+      return { id: item.id, updatedAt: typeof item.updatedAt === 'string' ? item.updatedAt : '', product };
     });
-    for (const entry of imported) entry.product.id = entry.id;
-    const stockMap = new Map();
-    const importedStock = Array.isArray(data.inventory) ? data.inventory.filter(item => item && UNITS[item.unit] && Number.isFinite(Number(item.quantity)) && Number.isFinite(Number(item.value))).map(item => {
-      const id = uid(); stockMap.set(item.id, id);
-      return { id, name: String(item.name ?? 'Lagerstück').slice(0, 100), unit: item.unit, quantity: Math.max(0, Number(item.quantity)), value: Math.max(0, Number(item.value)), mode: ['quantity', 'roundwood', 'squaredwood'].includes(item.mode) ? item.mode : 'quantity', diameter: String(item.diameter ?? ''), width: String(item.width ?? ''), height: String(item.height ?? ''), at: item.at };
-    }) : [];
-    const importedHistory = Array.isArray(data.history) ? data.history.filter(item => idMap.has(item.productId) && Number.isFinite(item.unitCost)).map(item => ({ ...item, productId: idMap.get(item.productId) })) : [];
-    saved.push(...imported); inventory.push(...importedStock); history.push(...importedHistory);
-    draft = cleanProduct(data.draft); draft.id = null;
-    for (const product of [draft, ...imported.map(entry => entry.product)]) {
-      for (const item of product.materials) { item.stockId = stockMap.get(item.stockId) || null; item.restBookedId = stockMap.get(item.restBookedId) || null; }
-    }
-    historyProductId = null;
-    refresh(); persist();
-    $('saveStatus').textContent = `${imported.length} Kalkulationen importiert`;
+    const importedStock = (data.inventory || []).map(item => {
+      if (!item || typeof item.id !== 'string' || !item.id || !UNITS[item.unit] || !Number.isFinite(Number(item.quantity)) || Number(item.quantity) < 0 || !Number.isFinite(Number(item.value)) || Number(item.value) < 0) throw new Error('Das Backup enthält einen ungültigen Lagerartikel.');
+      return cleanStock(item);
+    });
+    const readDeleted = value => {
+      if (value === undefined) return [];
+      if (!Array.isArray(value) || value.some(id => typeof id !== 'string' || !id)) throw new Error('Das Backup enthält ungültige Löschmarkierungen.');
+      return [...new Set(value)];
+    };
+    const incomingDeletedProducts = readDeleted(data.deletedProducts);
+    const incomingDeletedStock = readDeleted(data.deletedStock);
+    if (new Set(imported.map(item => item.id)).size !== imported.length || new Set(importedStock.map(item => item.id)).size !== importedStock.length || imported.some(item => incomingDeletedProducts.includes(item.id)) || importedStock.some(item => incomingDeletedStock.includes(item.id))) throw new Error('Das Backup enthält doppelte oder widersprüchliche Kennungen.');
+    const local = { draft: cleanProduct(draft), saved: saved.map(entry => ({ ...entry, product: cleanProduct(entry.product) })), inventory: inventory.map(cleanStock), history, deletedProducts, deletedStock };
+    const incoming = { draft: cleanProduct(data.draft), saved: imported, inventory: importedStock, history: Array.isArray(data.history) ? data.history.filter(item => item && typeof item.productId === 'string' && Number.isFinite(item.unitCost)) : [], deletedProducts: incomingDeletedProducts, deletedStock: incomingDeletedStock };
+    const merged = mergeBackup(local, incoming, resolveSyncConflict);
+    ({ draft, saved, inventory, history, deletedProducts, deletedStock } = merged);
+    if (draft.id && !saved.some(entry => entry.id === draft.id)) draft.id = null;
+    historyProductId = draft.id;
+    refresh(); await persist();
+    if (storageOK) $('saveStatus').textContent = 'Backup abgeglichen';
   } catch (error) { alert(error.message || 'Das Backup konnte nicht gelesen werden.'); }
 });
 

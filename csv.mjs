@@ -8,9 +8,9 @@ export function toCsv(rows) {
 }
 
 export function inventoryToCsv(inventory) {
-  const rows = [['Bezeichnung', 'Menge', 'Einheit', 'Materialwert EUR', 'Berechnungsart', 'Durchmesser cm', 'Breite cm', 'Höhe cm']];
+  const rows = [['Bezeichnung', 'Menge', 'Einheit', 'Materialwert EUR', 'Berechnungsart', 'Durchmesser cm', 'Breite cm', 'Höhe cm', 'Mindestbestand']];
   for (const item of inventory) {
-    rows.push([item.name, String(item.quantity).replace('.', ','), item.unit, String(item.value).replace('.', ','), item.mode || 'quantity', item.diameter || '', item.width || '', item.height || '']);
+    rows.push([item.name, String(item.quantity).replace('.', ','), item.unit, String(item.value).replace('.', ','), item.mode || 'quantity', item.diameter || '', item.width || '', item.height || '', String(item.minimum || 0).replace('.', ',')]);
   }
   return toCsv(rows);
 }
