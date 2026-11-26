@@ -33,6 +33,11 @@ function mergeCollection(local, incoming, localDeleted, incomingDeleted, kind, r
 export function mergeBackup(local, incoming, resolve) {
   const products = mergeCollection(local.saved, incoming.saved, local.deletedProducts, incoming.deletedProducts, 'product', resolve);
   const stock = mergeCollection(local.inventory, incoming.inventory, local.deletedStock, incoming.deletedStock, 'stock', resolve);
+  const documents = mergeCollection(local.documents || [], incoming.documents || [], local.deletedDocuments || [], incoming.deletedDocuments || [], 'document', resolve);
+  let businessProfile = local.businessProfile || incoming.businessProfile || {};
+  if (local.businessProfile && incoming.businessProfile && !same(local.businessProfile, incoming.businessProfile) && resolve({ kind: 'businessProfile', local: local.businessProfile, incoming: incoming.businessProfile })) {
+    businessProfile = incoming.businessProfile;
+  }
   const productIds = new Set(products.entries.map(entry => entry.id));
   const seen = new Set();
   const history = [...local.history, ...incoming.history].filter(item => {
@@ -41,5 +46,9 @@ export function mergeBackup(local, incoming, resolve) {
     seen.add(key); return true;
   });
   const draft = same(local.draft, incoming.draft) || !resolve({ kind: 'draft', local: local.draft, incoming: incoming.draft }) ? local.draft : incoming.draft;
-  return { draft, saved: products.entries, inventory: stock.entries, history, deletedProducts: products.deleted, deletedStock: stock.deleted };
+  return {
+    draft, saved: products.entries, inventory: stock.entries, history,
+    deletedProducts: products.deleted, deletedStock: stock.deleted,
+    businessProfile, documents: documents.entries, deletedDocuments: documents.deleted,
+  };
 }

@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mergeBackup } from '../sync.mjs';
 
-const state = () => ({ draft: { productName: '' }, saved: [], inventory: [], history: [], deletedProducts: [], deletedStock: [] });
+const state = () => ({ draft: { productName: '' }, saved: [], inventory: [], history: [], deletedProducts: [], deletedStock: [], businessProfile: {}, documents: [], deletedDocuments: [] });
 const chooseIncoming = () => true;
 
 test('repeated imports preserve identities and do not duplicate stock, products or history', () => {
@@ -58,4 +58,40 @@ test('independent additions merge without conflict and choosing local keeps both
   assert.equal(conflicts.length, 1);
   assert.deepEqual(merged.saved.map(item => item.product.name), ['Lokal', 'Neu']);
   assert.deepEqual(merged.inventory.map(item => item.id), ['s1', 's2']);
+});
+
+test('documents merge by identity and conflicting edits require an explicit choice', () => {
+  const local = state(); const remote = state();
+  local.documents.push({ id: 'invoice-1', type: 'invoice', number: 'R-2026-0001', status: 'issued' });
+  remote.documents.push({ id: 'invoice-1', type: 'invoice', number: 'R-2026-0001', status: 'paid' }, { id: 'offer-2', type: 'offer', status: 'draft' });
+  const conflicts = [];
+  const merged = mergeBackup(local, remote, conflict => { conflicts.push(conflict); return false; });
+  assert.equal(conflicts[0].kind, 'document');
+  assert.equal(merged.documents.find(item => item.id === 'invoice-1').status, 'issued');
+  assert.equal(merged.documents.find(item => item.id === 'offer-2').status, 'draft');
+});
+
+test('legacy backups without document collections still merge', () => {
+  const merged = mergeBackup({ draft: { productName: '' }, saved: [], inventory: [], history: [], deletedProducts: [], deletedStock: [] }, { draft: { productName: '' }, saved: [], inventory: [], history: [], deletedProducts: [], deletedStock: [] }, chooseIncoming);
+  assert.deepEqual(merged.documents, []);
+  assert.deepEqual(merged.deletedDocuments, []);
+});
+
+test('legacy backup without a business profile preserves the current profile', () => {
+  const local = state();
+  local.businessProfile = { name: 'Meine Werkstatt' };
+  const legacy = { draft: { productName: '' }, saved: [], inventory: [], history: [], deletedProducts: [], deletedStock: [] };
+  const merged = mergeBackup(local, legacy, () => { throw new Error('Missing legacy profile must not conflict'); });
+  assert.deepEqual(merged.businessProfile, local.businessProfile);
+});
+
+test('conflicting business profiles require an explicit choice', () => {
+  const local = state(); const incoming = state();
+  local.businessProfile.name = 'Lokal';
+  incoming.businessProfile.name = 'Import';
+  let conflict;
+  const kept = mergeBackup(local, incoming, value => { conflict = value; return false; });
+  assert.equal(conflict.kind, 'businessProfile');
+  assert.equal(kept.businessProfile.name, 'Lokal');
+  assert.equal(mergeBackup(local, incoming, () => true).businessProfile.name, 'Import');
 });

@@ -2,6 +2,7 @@ import { calculate, calculateSeries, calculateDiscount, numberFromInput, stockMa
 import { loadState, saveState } from './storage.mjs';
 import { toCsv, parseCsv, inventoryToCsv } from './csv.mjs';
 import { mergeBackup } from './sync.mjs';
+import { calculateDocumentTotals, cleanBusinessProfile, cleanDocument, createCancellationFromInvoice, createDeliveryNoteFromDocument, createDocument, createInvoiceFromOffer, issueDocument, parseDocumentExport, recordPayment, roundMoney, serializeDocumentExport } from './documents.mjs';
 
 const euro = new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' });
 const percent = new Intl.NumberFormat('de-DE', { maximumFractionDigits: 1, minimumFractionDigits: 1 });
@@ -60,6 +61,11 @@ let inventory = Array.isArray(stored?.inventory) ? stored.inventory.filter(item 
 let history = Array.isArray(stored?.history) ? stored.history.filter(item => item && typeof item.productId === 'string' && Number.isFinite(item.unitCost)) : [];
 let deletedProducts = Array.isArray(stored?.deletedProducts) ? stored.deletedProducts.filter(id => typeof id === 'string') : [];
 let deletedStock = Array.isArray(stored?.deletedStock) ? stored.deletedStock.filter(id => typeof id === 'string') : [];
+let businessProfile = cleanBusinessProfile(stored?.businessProfile);
+let documents = Array.isArray(stored?.documents) ? stored.documents.map(cleanDocument).filter(Boolean) : [];
+let deletedDocuments = Array.isArray(stored?.deletedDocuments) ? stored.deletedDocuments.filter(id => typeof id === 'string') : [];
+let editingDocument = null;
+let paymentDocumentId = null;
 let historyProductId = draft.id;
 let saveTimer;
 let storageOK = true;
@@ -68,7 +74,7 @@ let writeQueue = Promise.resolve();
 function persist() {
   clearTimeout(saveTimer);
   $('saveStatus').textContent = 'Speichert …';
-  const snapshot = structuredClone({ version: 3, draft, saved, inventory, history, deletedProducts, deletedStock });
+  const snapshot = structuredClone({ version: 4, draft, saved, inventory, history, deletedProducts, deletedStock, businessProfile, documents, deletedDocuments });
   writeQueue = writeQueue.catch(() => {}).then(() => saveState(snapshot)).then(() => {
     storageOK = true;
     $('saveStatus').textContent = 'Lokal gespeichert';
@@ -237,7 +243,38 @@ function renderHistory() {
   $('historyContent').innerHTML = entry ? `<strong>${plain(entry.product.productName)}</strong><div class="table-scroll"><table><thead><tr><th>Gespeichert</th><th>Stück</th><th>Material</th><th>Kosten je Stück</th><th>Empfohlener Preis</th><th>Kanal</th></tr></thead><tbody>${rows.map(item => `<tr><td>${plain(new Date(item.at).toLocaleString('de-DE'))}</td><td>${item.quantity}</td><td>${money(item.materials)}</td><td>${money(item.unitCost)}</td><td>${money(item.recommendedPrice)}</td><td>${plain(item.channel)}</td></tr>`).join('')}</tbody></table></div>` : '<div class="empty-list">Öffne ein Produkt oder wähle „Verlauf“ in der Bibliothek.</div>';
 }
 
-function refresh() { renderFields(); renderLists(); renderResult(); renderSaved(); renderInventory(); renderHistory(); }
+function renderBusinessProfile() {
+  const fields = { businessName: 'name', businessStreet: 'street', businessPostalCode: 'postalCode', businessCity: 'city', businessEmail: 'email', businessPhone: 'phone', businessIdentifier: 'identifier', businessPaymentDetails: 'paymentDetails', businessTaxMode: 'taxMode', businessVatRate: 'defaultVatRate' };
+  for (const [id, key] of Object.entries(fields)) $(id).value = String(businessProfile[key] ?? '');
+  $('businessVatRate').closest('.field').hidden = businessProfile.taxMode !== 'standard';
+}
+
+function renderDocuments() {
+  const filter = $('documentFilter').value;
+  const query = $('documentSearch').value.trim().toLocaleLowerCase('de');
+  const shown = [...documents].filter(document => (filter === 'all' || document.type === filter)
+    && (!query || `${document.number} ${document.customer.name}`.toLocaleLowerCase('de').includes(query)))
+    .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+  $('documentList').innerHTML = shown.length ? shown.map(document => {
+    const typeLabel = { offer: 'Angebot', invoice: 'Rechnung', 'delivery-note': 'Lieferschein', cancellation: 'Storno' }[document.type] || 'Beleg';
+    const statusLabel = document.status === 'cancelled' ? 'Storniert' : document.type === 'invoice' && document.paymentStatus === 'partial' ? 'Teilweise bezahlt' : { draft: 'Entwurf', issued: 'Ausgestellt', accepted: 'Angenommen', converted: 'In Rechnung umgewandelt', declined: 'Abgelehnt', cancelled: 'Storniert', paid: 'Bezahlt' }[document.status] || 'Entwurf';
+    const totals = calculateDocumentTotals(document);
+    const title = `${typeLabel}${document.number ? ` ${document.number}` : ''}`;
+    const dateText = document.issuedAt ? new Date(document.issuedAt).toLocaleDateString('de-DE') : 'Noch nicht ausgestellt';
+    const positionCount = totals.items.length;
+    const balance = roundMoney(totals.gross - Number(document.paidAmount || 0));
+    const amountSummary = document.type === 'invoice' && document.paidAmount > 0 ? `${money(document.paidAmount)} bezahlt · ${money(balance)} offen` : money(totals.gross);
+    const summary = document.type === 'delivery-note' ? `${positionCount} ${positionCount === 1 ? 'Position' : 'Positionen'} · ${quantityFormat.format(totals.items.reduce((sum, item) => sum + item.quantity, 0))} Stück` : amountSummary;
+    const canShip = ['issued', 'accepted', 'converted', 'paid'].includes(document.status) && ['offer', 'invoice'].includes(document.type);
+    const canPay = document.type === 'invoice' && document.status === 'issued' && balance > 0;
+    const canCancel = document.type === 'invoice' && ['issued', 'paid'].includes(document.status);
+    const hasInvoice = document.type === 'offer' && documents.some(item => item.type === 'invoice' && item.sourceDocumentId === document.id);
+    const canConvert = document.type === 'offer' && ['issued', 'accepted'].includes(document.status) && !hasInvoice;
+    return `<article class="document-row" data-document-id="${plain(document.id)}"><div class="document-row-main"><span class="document-kind">${typeLabel} · ${statusLabel}</span><strong>${plain(title)}</strong><small>${plain(document.customer.name || 'Kein Kunde')} · ${dateText} · ${summary}</small>${document.donationProject ? `<small>Spendenprojekt: ${plain(document.donationProject)}</small>` : ''}</div><div class="document-row-actions"><button class="button small open-document" type="button">Öffnen</button><button class="button small print-document" type="button">PDF</button><button class="button small export-document" type="button">JSON</button>${document.type === 'offer' && document.status === 'issued' ? '<button class="button small accept-document" type="button">Annehmen</button>' : ''}${canConvert ? '<button class="button small invoice-from-offer" type="button">Rechnung erstellen</button>' : ''}${canShip ? '<button class="button small delivery-from-document" type="button">Lieferschein erstellen</button>' : ''}${canPay ? '<button class="button small record-payment" type="button">Zahlung erfassen</button>' : ''}${canCancel ? '<button class="button small danger create-cancellation" type="button">Storno erstellen</button>' : ''}${document.status === 'draft' ? '<button class="button small danger delete-document" type="button">Löschen</button>' : ''}</div></article>`;
+  }).join('') : '<div class="empty-list">Noch keine Angebote oder Rechnungen gespeichert.</div>';
+}
+
+function refresh() { renderFields(); renderLists(); renderResult(); renderSaved(); renderInventory(); renderHistory(); renderBusinessProfile(); renderDocuments(); }
 const hasDraftContent = () => Boolean(draft.productName || draft.category || draft.description || draft.photo || draft.materials.length || draft.extras.length);
 function hasUnsavedChanges() {
   if (!hasDraftContent()) return false;
@@ -512,15 +549,17 @@ function downloadBlob(data, type, filename) {
 
 $('exportButton').addEventListener('click', async () => {
   await persist();
-  downloadBlob(JSON.stringify({ format: 'preisrechner', version: 3, exportedAt: new Date().toISOString(), draft, saved, inventory, history, deletedProducts, deletedStock }, null, 2), 'application/json', `preisrechner-backup-${new Date().toISOString().slice(0, 10)}.json`);
+  downloadBlob(JSON.stringify({ format: 'preisrechner', version: 4, exportedAt: new Date().toISOString(), draft, saved, inventory, history, deletedProducts, deletedStock, businessProfile, documents, deletedDocuments }, null, 2), 'application/json', `preisrechner-backup-${new Date().toISOString().slice(0, 10)}.json`);
 });
 $('importButton').addEventListener('click', () => $('importFile').click());
 function resolveSyncConflict(conflict) {
   if (conflict.kind === 'draft') return confirm('Der importierte Entwurf unterscheidet sich vom aktuellen Entwurf.\n\nOK: importierten Entwurf übernehmen.\nAbbrechen: aktuellen Entwurf behalten.');
-  const label = conflict.kind === 'stock' ? 'Lagerartikel' : 'Produkt';
+  if (conflict.kind === 'businessProfile') return confirm(`Die Absenderdaten unterscheiden sich zwischen den Instanzen.\n\nHier: ${conflict.local.name || 'Ohne Namen'}\nImport: ${conflict.incoming.name || 'Ohne Namen'}\n\nOK: importierte Absenderdaten übernehmen.\nAbbrechen: hiesige Daten behalten.`);
+  const label = { stock: 'Lagerartikel', document: 'Beleg', product: 'Produkt' }[conflict.kind] || 'Eintrag';
   const describe = item => {
     if (!item) return 'gelöscht';
     if (conflict.kind === 'stock') return `${item.name}: ${item.quantity} ${item.unit}, ${money(item.value)}, Mindestbestand ${item.minimum || 0}`;
+    if (conflict.kind === 'document') return `${item.type === 'offer' ? 'Angebot' : 'Rechnung'} ${item.number || '(Entwurf)'} · ${item.customer?.name || 'Kein Kunde'} · ${item.status}`;
     const result = calculate(item.product);
     return `${item.product.productName || 'Unbenannt'}${item.updatedAt ? ` (${item.updatedAt})` : ''}\n  ${item.product.category || 'Ohne Kategorie'} · ${item.product.materials.length} Materialien · ${result.errors.length ? 'Kalkulation unvollständig' : `Herstellung ${money(result.unitCost)} / Empfehlung ${money(result.suggestions[1]?.price)}`}`;
   };
@@ -533,7 +572,7 @@ $('importFile').addEventListener('change', async event => {
   try {
     if (file.size > 50_000_000) throw new Error('Die Datei ist zu groß.');
     const data = JSON.parse(await file.text());
-    if (data.format !== 'preisrechner' || ![1, 2, 3].includes(data.version) || !Array.isArray(data.saved) || !data.draft || (data.inventory !== undefined && !Array.isArray(data.inventory))) throw new Error('Das ist kein gültiges Preisrechner-Backup.');
+    if (data.format !== 'preisrechner' || ![1, 2, 3, 4].includes(data.version) || !Array.isArray(data.saved) || !data.draft || (data.inventory !== undefined && !Array.isArray(data.inventory)) || (data.documents !== undefined && !Array.isArray(data.documents))) throw new Error('Das ist kein gültiges Preisrechner-Backup.');
     const imported = data.saved.map(item => {
       if (!item || typeof item.id !== 'string' || !item.id || !item.product || typeof item.product !== 'object') throw new Error('Das Backup enthält ein ungültiges Produkt.');
       const product = cleanProduct(item.product); product.id = item.id;
@@ -550,11 +589,20 @@ $('importFile').addEventListener('change', async event => {
     };
     const incomingDeletedProducts = readDeleted(data.deletedProducts);
     const incomingDeletedStock = readDeleted(data.deletedStock);
-    if (new Set(imported.map(item => item.id)).size !== imported.length || new Set(importedStock.map(item => item.id)).size !== importedStock.length || imported.some(item => incomingDeletedProducts.includes(item.id)) || importedStock.some(item => incomingDeletedStock.includes(item.id))) throw new Error('Das Backup enthält doppelte oder widersprüchliche Kennungen.');
-    const local = { draft: cleanProduct(draft), saved: saved.map(entry => ({ ...entry, product: cleanProduct(entry.product) })), inventory: inventory.map(cleanStock), history, deletedProducts, deletedStock };
-    const incoming = { draft: cleanProduct(data.draft), saved: imported, inventory: importedStock, history: Array.isArray(data.history) ? data.history.filter(item => item && typeof item.productId === 'string' && Number.isFinite(item.unitCost)) : [], deletedProducts: incomingDeletedProducts, deletedStock: incomingDeletedStock };
+    const incomingDocuments = (data.documents || []).map(item => {
+      const document = cleanDocument(item);
+      if (!document) throw new Error('Das Backup enthält einen ungültigen Beleg.');
+      return document;
+    });
+    const incomingDeletedDocuments = readDeleted(data.deletedDocuments);
+    if (new Set(imported.map(item => item.id)).size !== imported.length || new Set(importedStock.map(item => item.id)).size !== importedStock.length || new Set(incomingDocuments.map(item => item.id)).size !== incomingDocuments.length || imported.some(item => incomingDeletedProducts.includes(item.id)) || importedStock.some(item => incomingDeletedStock.includes(item.id)) || incomingDocuments.some(item => incomingDeletedDocuments.includes(item.id))) throw new Error('Das Backup enthält doppelte oder widersprüchliche Kennungen.');
+    const local = { draft: cleanProduct(draft), saved: saved.map(entry => ({ ...entry, product: cleanProduct(entry.product) })), inventory: inventory.map(cleanStock), history, deletedProducts, deletedStock, businessProfile, documents, deletedDocuments };
+    const incoming = { draft: cleanProduct(data.draft), saved: imported, inventory: importedStock, history: Array.isArray(data.history) ? data.history.filter(item => item && typeof item.productId === 'string' && Number.isFinite(item.unitCost)) : [], deletedProducts: incomingDeletedProducts, deletedStock: incomingDeletedStock, businessProfile: data.businessProfile ? cleanBusinessProfile(data.businessProfile) : null, documents: incomingDocuments, deletedDocuments: incomingDeletedDocuments };
     const merged = mergeBackup(local, incoming, resolveSyncConflict);
-    ({ draft, saved, inventory, history, deletedProducts, deletedStock } = merged);
+    const numberedDocuments = merged.documents.filter(item => item.number);
+    const uniqueNumbers = new Set(numberedDocuments.map(item => item.number));
+    if (uniqueNumbers.size !== numberedDocuments.length) throw new Error('Das Backup enthält Belege mit doppelten Nummern. Der Abgleich wurde nicht übernommen.');
+    ({ draft, saved, inventory, history, deletedProducts, deletedStock, businessProfile, documents, deletedDocuments } = merged);
     if (draft.id && !saved.some(entry => entry.id === draft.id)) draft.id = null;
     historyProductId = draft.id;
     refresh(); await persist();
@@ -605,27 +653,232 @@ $('importCsvFile').addEventListener('change', async event => {
   } catch (error) { alert(error.message || 'Die CSV-Datei konnte nicht gelesen werden.'); }
 });
 
-function renderOffer() {
-  const quantity = numberFromInput($('offerQuantity').value);
-  const result = calculateSeries(draft, [quantity])[0];
-  if (!result || result.batchCost === 0) { $('offerPreview').textContent = 'Bitte eine gültige Stückzahl und Produktkalkulation eingeben.'; $('printOfferButton').disabled = true; return; }
-  $('printOfferButton').disabled = false;
-  const tier = result.suggestions.find(item => item.kind === $('offerTier').value) || result.suggestions[1];
-  const total = tier.price * quantity;
-  $('offerPreview').innerHTML = `<strong>${plain(draft.productName)}</strong><span>${quantity} × ${money(tier.price)} = ${money(total)}</span>`;
-  $('offerSheet').innerHTML = `<div class="offer-sheet-head"><div><span>PREISANGEBOT</span><h1>${plain(draft.productName)}</h1></div><strong>${plain($('offerSeller').value || 'Handgemacht')}</strong></div><p>Datum: ${plain(new Date().toLocaleDateString('de-DE'))}</p>${$('offerCustomer').value.trim() ? `<p>Für: ${plain($('offerCustomer').value.trim())}</p>` : ''}<div class="offer-product">${draft.photo ? `<img src="${draft.photo}" alt="">` : ''}<div>${draft.category ? `<small>${plain(draft.category)}</small>` : ''}<h2>${plain(draft.productName)}</h2><p>${plain(draft.description)}</p></div></div><table><thead><tr><th>Produkt</th><th>Menge</th><th>Einzelpreis</th><th>Gesamt</th></tr></thead><tbody><tr><td>${plain(draft.productName)}</td><td>${quantity}</td><td>${money(tier.price)}</td><td>${money(total)}</td></tr></tbody></table><div class="offer-total">Angebotspreis <strong>${money(total)}</strong></div>${$('offerNotes').value.trim() ? `<p class="offer-notes">${plain($('offerNotes').value.trim())}</p>` : ''}<p class="offer-foot">Preisangebot für das beschriebene Produkt. Enthaltene Umsatzsteuer richtet sich nach der Kalkulation.</p>`;
+function localDateValue() {
+  const today = new Date();
+  today.setMinutes(today.getMinutes() - today.getTimezoneOffset());
+  return today.toISOString().slice(0, 10);
 }
 
-$('offerButton').addEventListener('click', () => {
-  const result = calculate(draft);
-  if (!draft.productName.trim() || result.errors.length || result.batchCost === 0) { $('saveStatus').textContent = 'Für ein Angebot bitte zuerst Name und gültige Kosten eingeben.'; return; }
-  $('offerQuantity').value = draft.batchSize;
-  renderOffer(); $('offerDialog').showModal();
+function createDocumentDraft(type) {
+  if (!draft.productName.trim()) { $('saveStatus').textContent = 'Bitte zuerst einen Produktnamen eintragen.'; return null; }
+  const pricingDraft = structuredClone(draft);
+  pricingDraft.vatPercent = businessProfile.taxMode === 'standard' ? String(businessProfile.defaultVatRate).replace('.', ',') : '0';
+  const result = calculate(pricingDraft);
+  if (result.errors.length || result.batchCost === 0) { $('saveStatus').textContent = 'Bitte zuerst eine gültige Produktkalkulation erstellen.'; return null; }
+  const series = type === 'delivery-note' ? null : calculateSeries(pricingDraft, [result.batchSize])[0];
+  if (type !== 'delivery-note' && !series?.suggestions[1]) { $('saveStatus').textContent = 'Für diese Kalkulation konnte kein Verkaufspreis ermittelt werden.'; return null; }
+  return createDocument({
+    type, seller: businessProfile, taxMode: businessProfile.taxMode, serviceDate: type === 'offer' ? '' : localDateValue(),
+    items: [{ description: pricingDraft.productName, quantity: result.batchSize, unitPrice: series?.suggestions[1]?.price || 0, vatRate: type !== 'delivery-note' && businessProfile.taxMode === 'standard' ? businessProfile.defaultVatRate : 0 }],
+  });
+}
+
+function documentItemHTML(item, index, readonly) {
+  const disabled = readonly ? 'disabled' : '';
+  const isDeliveryNote = editingDocument.type === 'delivery-note';
+  const taxDisabled = readonly || isDeliveryNote || editingDocument.taxMode !== 'standard' ? 'disabled' : '';
+  return `<div class="document-item-editor ${isDeliveryNote ? 'delivery-note-item' : ''}" data-item-index="${index}"><label class="field">Bezeichnung<input data-item-field="description" value="${plain(item.description)}" maxlength="240" ${disabled}></label><label class="field">Menge<input data-item-field="quantity" inputmode="decimal" value="${plain(item.quantity)}" ${disabled}></label>${isDeliveryNote ? '' : `<label class="field">Preis je Stück <span class="unit-label">€</span><input data-item-field="unitPrice" inputmode="decimal" value="${plain(item.unitPrice)}" ${disabled}></label><label class="field">USt. <span class="unit-label">%</span><input data-item-field="vatRate" type="number" min="0" max="100" step="0.1" value="${plain(editingDocument.taxMode === 'standard' ? item.vatRate : 0)}" ${taxDisabled}></label>`}${readonly ? '' : `<button class="button small danger remove-document-item" type="button" aria-label="Position ${index + 1} entfernen">Entfernen</button>`}</div>`;
+}
+
+function renderDocumentEditor() {
+  if (!editingDocument) return;
+  const readonly = editingDocument.status !== 'draft';
+  const typeLabel = { offer: 'Angebot', invoice: 'Rechnung', 'delivery-note': 'Lieferschein', cancellation: 'Storno' }[editingDocument.type];
+  $('documentDialogTitle').textContent = `${typeLabel}${editingDocument.number ? ` ${editingDocument.number}` : ' · Entwurf'}`;
+  document.querySelectorAll('[data-offer-only]').forEach(field => { field.hidden = editingDocument.type !== 'offer'; });
+  document.querySelectorAll('[data-invoice-only]').forEach(field => { field.hidden = editingDocument.type !== 'invoice'; });
+  document.querySelectorAll('[data-invoice-or-delivery]').forEach(field => { field.hidden = !['invoice', 'delivery-note', 'cancellation'].includes(editingDocument.type); });
+  $('documentForm').querySelectorAll('[data-document-field]').forEach(field => {
+    const path = field.dataset.documentField.split('.');
+    field.value = path.length === 2 ? editingDocument[path[0]]?.[path[1]] ?? '' : editingDocument[path[0]] ?? '';
+    field.disabled = readonly;
+  });
+  $('documentItems').innerHTML = editingDocument.items.map((item, index) => documentItemHTML(item, index, readonly)).join('');
+  $('addDocumentItem').hidden = readonly;
+  $('saveDocumentButton').hidden = readonly;
+  $('issueDocumentButton').hidden = readonly;
+  $('documentErrors').innerHTML = '';
+  renderDocumentPreview();
+}
+
+function readDocumentEditor() {
+  if (!editingDocument || editingDocument.status !== 'draft') return;
+  $('documentForm').querySelectorAll('[data-document-field]').forEach(field => {
+    const [group, key] = field.dataset.documentField.split('.');
+    if (key) editingDocument[group][key] = field.value;
+    else editingDocument[group] = field.value;
+  });
+  const isDeliveryNote = editingDocument.type === 'delivery-note';
+  editingDocument.items = [...$('documentItems').querySelectorAll('.document-item-editor')].map(row => ({
+    description: row.querySelector('[data-item-field="description"]').value,
+    quantity: numberFromInput(row.querySelector('[data-item-field="quantity"]').value),
+    unitPrice: isDeliveryNote ? 0 : numberFromInput(row.querySelector('[data-item-field="unitPrice"]').value),
+    vatRate: !isDeliveryNote && editingDocument.taxMode === 'standard' ? numberFromInput(row.querySelector('[data-item-field="vatRate"]').value) : 0,
+  }));
+}
+
+function renderDocumentPreview() {
+  if (!editingDocument) return;
+  const totals = calculateDocumentTotals(editingDocument);
+  $('documentPreview').textContent = totals.errors.length ? 'Bitte Positionen prüfen.' : editingDocument.type === 'delivery-note' ? `Lieferschein · ${totals.items.length} Positionen ohne Preisangaben` : `Zwischensumme ${money(totals.net)} · Umsatzsteuer ${money(totals.tax)} · Gesamt ${money(totals.gross)}`;
+}
+
+function showDocumentErrors(errors) {
+  $('documentErrors').innerHTML = errors.map(message => `<div class="alert error">${plain(message)}</div>`).join('');
+}
+
+function saveDocumentDraft() {
+  if (!editingDocument || editingDocument.status !== 'draft') return;
+  readDocumentEditor();
+  editingDocument.updatedAt = new Date().toISOString();
+  const existing = documents.findIndex(document => document.id === editingDocument.id);
+  if (existing < 0) documents.push(structuredClone(editingDocument));
+  else documents[existing] = structuredClone(editingDocument);
+  deletedDocuments = deletedDocuments.filter(id => id !== editingDocument.id);
+  renderDocuments(); persist(); $('documentErrors').innerHTML = '<div class="positive-note">Entwurf gespeichert.</div>';
+}
+
+function renderDocumentSheet(document) {
+  const totals = calculateDocumentTotals(document);
+  const seller = document.seller?.name ? document.seller : businessProfile;
+  const address = party => [party.street, [party.postalCode, party.city].filter(Boolean).join(' ')].filter(Boolean).map(plain).join('<br>');
+  const isDeliveryNote = document.type === 'delivery-note';
+  const typeLabel = { offer: 'Angebot', invoice: 'Rechnung', 'delivery-note': 'Lieferschein' }[document.type];
+  const draftLabel = document.status === 'draft' ? '<span>ENTWURF</span>' : '';
+  const rows = totals.items.map(item => isDeliveryNote ? `<tr><td>${plain(item.description)}</td><td>${quantityFormat.format(item.quantity)}</td></tr>` : `<tr><td>${plain(item.description)}</td><td>${quantityFormat.format(item.quantity)}</td><td class="document-amount">${money(document.type === 'cancellation' ? -item.unitPrice : item.unitPrice)}</td><td class="document-amount">${money(item.gross)}</td></tr>`).join('');
+  const columns = isDeliveryNote ? '<tr><th>Gelieferter Artikel / Leistung</th><th>Menge</th></tr>' : '<tr><th>Leistung / Produkt</th><th>Menge</th><th class="document-amount">Einzelpreis</th><th class="document-amount">Gesamt</th></tr>';
+  const taxGroups = [...new Map(totals.items.map(item => [item.vatRate, totals.items.filter(line => line.vatRate === item.vatRate).reduce((sum, line) => sum + line.tax, 0)])).entries()];
+  const taxRows = !isDeliveryNote && document.taxMode === 'standard' ? taxGroups.map(([rate, amount]) => `<div><span>Umsatzsteuer ${percent.format(rate)} %</span><strong>${money(amount)}</strong></div>`).join('') : '';
+  const donation = document.donationProject ? `<p class="document-sheet-donation">Spendenhinweis: Der Erlös aus diesem Verkauf ist für <strong>${plain(document.donationProject)}</strong> bestimmt. Dies ist keine steuerliche Zuwendungsbestätigung.</p>` : '';
+  const taxNote = !isDeliveryNote && document.taxMode === 'small-business' && ['invoice', 'cancellation'].includes(document.type) ? '<p class="document-sheet-foot">Umsatzsteuer wird gemäß § 19 UStG nicht erhoben.</p>' : '';
+  const totalLabel = document.type === 'offer' ? 'Angebotssumme' : document.type === 'cancellation' ? 'Stornobetrag' : 'Rechnungsbetrag';
+  const totalsHTML = isDeliveryNote ? '' : `<div class="document-sheet-totals"><div><span>Netto</span><strong>${money(totals.net)}</strong></div>${taxRows}<div class="document-grand-total"><span>${totalLabel}</span><strong>${money(totals.gross)}</strong></div></div>`;
+  const identifier = !isDeliveryNote && seller.identifier ? `Steuerkennung: ${plain(seller.identifier)} · ` : '';
+  const paymentNote = document.type === 'invoice' && document.dueDate ? 'Bitte begleichen Sie den Rechnungsbetrag bis zum angegebenen Fälligkeitsdatum.' : '';
+  const paymentDetails = document.type === 'invoice' && seller.paymentDetails ? `<p>Zahlung: ${plain(seller.paymentDetails)}</p>` : '';
+  $('documentSheet').innerHTML = `<header class="document-sheet-head"><div>${draftLabel}<h1>${typeLabel}</h1><strong>${plain(document.number || 'Entwurf')}</strong></div><div><strong>${plain(seller.name)}</strong><p>${address(seller)}</p>${seller.email ? `<p>${plain(seller.email)}</p>` : ''}${seller.phone ? `<p>${plain(seller.phone)}</p>` : ''}</div></header><div class="document-sheet-meta"><div><strong>${plain(document.customer.name)}</strong><p>${address(document.customer)}</p>${document.customer.email ? `<p>${plain(document.customer.email)}</p>` : ''}</div><div><p>Datum: ${plain(new Date(document.issuedAt || document.createdAt).toLocaleDateString('de-DE'))}</p>${document.serviceDate ? `<p>Liefer-/Leistungsdatum: ${plain(new Date(`${document.serviceDate}T12:00:00`).toLocaleDateString('de-DE'))}</p>` : ''}${document.validUntil ? `<p>Gültig bis: ${plain(new Date(`${document.validUntil}T12:00:00`).toLocaleDateString('de-DE'))}</p>` : ''}${document.dueDate ? `<p>Fällig am: ${plain(new Date(`${document.dueDate}T12:00:00`).toLocaleDateString('de-DE'))}</p>` : ''}</div></div><table><thead>${columns}</thead><tbody>${rows}</tbody></table>${totalsHTML}${taxNote}${document.notes ? `<p class="document-sheet-notes">${plain(document.notes)}</p>` : ''}${donation}${isDeliveryNote ? '<p class="document-sheet-foot">Dieser Lieferschein bestätigt die Lieferung, nicht die Zahlung.</p>' : ''}<footer class="document-sheet-foot">${identifier}${paymentDetails}${paymentNote}</footer>`;
+}
+
+function printDocument(documentData) {
+  renderDocumentSheet(documentData);
+  document.body.classList.add('print-document');
+  window.print();
+}
+
+function exportDocumentJSON(document) {
+  const filename = String(document.number || document.id).replace(/[<>:"/\\|?*\x00-\x1f]/g, '-');
+  downloadBlob(JSON.stringify(serializeDocumentExport(document), null, 2), 'application/json', `beleg-${filename}.json`);
+}
+
+function openDocument(document) {
+  editingDocument = structuredClone(document);
+  renderDocumentEditor();
+  $('documentDialog').showModal();
+}
+
+function issueCurrentDocument() {
+  readDocumentEditor();
+  const result = issueDocument(editingDocument, businessProfile, documents);
+  if (result.errors.length) { showDocumentErrors(result.errors); return; }
+  editingDocument = result.document;
+  const index = documents.findIndex(document => document.id === editingDocument.id);
+  if (index < 0) documents.push(structuredClone(editingDocument)); else documents[index] = structuredClone(editingDocument);
+  if (editingDocument.type === 'cancellation') {
+    const original = documents.find(document => document.id === editingDocument.sourceDocumentId);
+    if (original) { original.status = 'cancelled'; original.updatedAt = editingDocument.issuedAt; }
+  }
+  if (editingDocument.type === 'invoice' && editingDocument.sourceDocumentId) {
+    const offer = documents.find(document => document.id === editingDocument.sourceDocumentId && document.type === 'offer');
+    if (offer) { offer.status = 'converted'; offer.updatedAt = editingDocument.issuedAt; }
+  }
+  renderDocumentEditor(); renderDocuments(); persist();
+}
+
+for (const [id, type] of [['createOfferButton', 'offer'], ['createInvoiceButton', 'invoice'], ['createDeliveryNoteButton', 'delivery-note']]) $(id).addEventListener('click', () => {
+  const document = createDocumentDraft(type);
+  if (!document) return;
+  editingDocument = document; renderDocumentEditor(); $('documentDialog').showModal();
 });
-for (const key of ['offerSeller', 'offerCustomer', 'offerTier', 'offerQuantity', 'offerNotes']) $(key).addEventListener('input', renderOffer);
-$('printOfferButton').addEventListener('click', () => { renderOffer(); document.body.classList.add('print-offer'); window.print(); });
-window.addEventListener('afterprint', () => document.body.classList.remove('print-offer'));
-$('offerDialog').addEventListener('close', () => document.body.classList.remove('print-offer'));
+$('openDocumentsButton').addEventListener('click', () => $('documentsSection').scrollIntoView({ behavior: 'smooth' }));
+$('saveBusinessProfile').addEventListener('click', () => {
+  businessProfile = cleanBusinessProfile({ name: $('businessName').value, street: $('businessStreet').value, postalCode: $('businessPostalCode').value, city: $('businessCity').value, email: $('businessEmail').value, phone: $('businessPhone').value, identifier: $('businessIdentifier').value, paymentDetails: $('businessPaymentDetails').value, taxMode: $('businessTaxMode').value, defaultVatRate: numberFromInput($('businessVatRate').value) });
+  persist(); renderBusinessProfile(); $('businessProfileStatus').textContent = 'Absenderdaten gespeichert.';
+});
+$('businessTaxMode').addEventListener('change', event => { $('businessVatRate').closest('.field').hidden = event.target.value !== 'standard'; });
+for (const id of ['documentFilter', 'documentSearch']) $(id).addEventListener(id === 'documentSearch' ? 'input' : 'change', renderDocuments);
+$('documentForm').addEventListener('input', event => { if (!editingDocument || editingDocument.status !== 'draft') return; readDocumentEditor(); renderDocumentPreview(); });
+$('documentForm').addEventListener('change', event => { if (!editingDocument || editingDocument.status !== 'draft') return; readDocumentEditor(); renderDocumentPreview(); });
+$('addDocumentItem').addEventListener('click', () => { if (!editingDocument || editingDocument.status !== 'draft') return; readDocumentEditor(); editingDocument.items.push({ description: '', quantity: 1, unitPrice: 0, vatRate: businessProfile.taxMode === 'standard' ? businessProfile.defaultVatRate : 0 }); renderDocumentEditor(); });
+$('documentItems').addEventListener('click', event => {
+  const button = event.target.closest('.remove-document-item');
+  if (!button || !editingDocument || editingDocument.status !== 'draft') return;
+  readDocumentEditor(); editingDocument.items.splice(Number(button.closest('[data-item-index]').dataset.itemIndex), 1); renderDocumentEditor();
+});
+$('saveDocumentButton').addEventListener('click', saveDocumentDraft);
+$('issueDocumentButton').addEventListener('click', issueCurrentDocument);
+$('printDocumentButton').addEventListener('click', () => { readDocumentEditor(); printDocument(editingDocument); });
+$('exportDocumentButton').addEventListener('click', () => { readDocumentEditor(); exportDocumentJSON(editingDocument); });
+window.addEventListener('afterprint', () => document.body.classList.remove('print-document'));
+$('documentDialog').addEventListener('close', () => document.body.classList.remove('print-document'));
+$('documentList').addEventListener('click', event => {
+  const row = event.target.closest('[data-document-id]');
+  if (!row) return;
+  const document = documents.find(item => item.id === row.dataset.documentId);
+  if (!document) return;
+  if (event.target.closest('.open-document')) openDocument(document);
+  else if (event.target.closest('.print-document')) printDocument(document);
+  else if (event.target.closest('.export-document')) exportDocumentJSON(document);
+  else if (event.target.closest('.accept-document')) { document.status = 'accepted'; document.updatedAt = new Date().toISOString(); renderDocuments(); persist(); }
+  else if (event.target.closest('.invoice-from-offer')) {
+    const invoice = createInvoiceFromOffer(document);
+    documents.push(invoice); renderDocuments(); persist(); openDocument(invoice);
+  } else if (event.target.closest('.delivery-from-document')) {
+    const deliveryNote = createDeliveryNoteFromDocument(document);
+    documents.push(deliveryNote); renderDocuments(); persist(); openDocument(deliveryNote);
+  } else if (event.target.closest('.record-payment')) {
+    const total = calculateDocumentTotals(document).gross;
+    const outstanding = roundMoney(total - Number(document.paidAmount || 0));
+    paymentDocumentId = document.id;
+    $('paymentOutstanding').textContent = `Noch offen: ${money(outstanding)}`;
+    $('paymentAmount').value = numberText(outstanding);
+    $('paymentError').innerHTML = '';
+    $('paymentDialog').showModal();
+  } else if (event.target.closest('.create-cancellation')) {
+    const cancellation = createCancellationFromInvoice(document);
+    documents.push(cancellation); renderDocuments(); persist(); openDocument(cancellation);
+  } else if (event.target.closest('.delete-document') && document.status === 'draft' && confirm('Diesen Belegentwurf löschen?')) {
+    documents = documents.filter(item => item.id !== document.id);
+    if (!deletedDocuments.includes(document.id)) deletedDocuments.push(document.id);
+    renderDocuments(); persist();
+  }
+});
+$('savePaymentButton').addEventListener('click', () => {
+  const document = documents.find(item => item.id === paymentDocumentId);
+  if (!document) { $('paymentDialog').close(); return; }
+  const payment = recordPayment(document, numberFromInput($('paymentAmount').value));
+  if (payment.error) { $('paymentError').innerHTML = `<div class="alert error">${plain(payment.error)}</div>`; return; }
+  documents = documents.map(item => item.id === document.id ? payment.document : item);
+  renderDocuments(); persist(); paymentDocumentId = null; $('paymentDialog').close();
+});
+$('importDocumentButton').addEventListener('click', () => $('importDocumentFile').click());
+$('importDocumentFile').addEventListener('change', async event => {
+  const file = event.target.files?.[0]; event.target.value = '';
+  if (!file) return;
+  try {
+    if (file.size > 5_000_000) throw new Error('Die Belegdatei ist zu groß.');
+    const data = JSON.parse(await file.text());
+    const imported = parseDocumentExport(data);
+    if (!imported) throw new Error('Die Datei enthält keinen gültigen Preisrechner-Beleg.');
+    if (documents.some(item => item.id !== imported.id && item.number && item.number === imported.number)) throw new Error('Diese Belegnummer ist bereits vergeben. Der Beleg wurde nicht importiert.');
+    const index = documents.findIndex(item => item.id === imported.id);
+    if (index >= 0) {
+      if (JSON.stringify(documents[index]) !== JSON.stringify(imported) && !confirm('Dieser Beleg ist bereits vorhanden und unterscheidet sich. Importierten Stand übernehmen?')) return;
+      documents[index] = imported;
+    } else documents.push(imported);
+    deletedDocuments = deletedDocuments.filter(id => id !== imported.id);
+    renderDocuments(); await persist(); $('saveStatus').textContent = 'Beleg importiert';
+  } catch (error) { alert(error.message || 'Der Beleg konnte nicht importiert werden.'); }
+});
 
 refresh();
 if (!storageOK) $('saveStatus').textContent = 'Speichern im Browser nicht möglich. Bitte Backup exportieren.';
