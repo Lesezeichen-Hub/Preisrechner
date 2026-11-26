@@ -1,3 +1,5 @@
+import { calculate, calculateSeries, numberFromInput } from './calculator.mjs';
+
 export const DOCUMENT_TYPES = ['offer', 'invoice', 'delivery-note', 'cancellation'];
 export const TAX_MODES = ['small-business', 'standard'];
 
@@ -15,7 +17,7 @@ export function cleanBusinessProfile(input) {
   };
 }
 
-export function createDocument({ type = 'offer', now = new Date(), id = newId(), seller = {}, customer = {}, items = [], taxMode = 'small-business', donationProject = '', notes = '', validUntil = '', dueDate = '', serviceDate = '', sourceDocumentId = null } = {}) {
+export function createDocument({ type = 'offer', now = new Date(), id = newId(), seller = {}, customer = {}, items = [], taxMode = 'small-business', donationProject = '', notes = '', validUntil = '', dueDate = '', serviceDate = '', sourceDocumentId = null, sourceProductId = null } = {}) {
   if (!DOCUMENT_TYPES.includes(type)) throw new TypeError('Unbekannte Belegart.');
   const timestamp = now.toISOString();
   return {
@@ -24,6 +26,7 @@ export function createDocument({ type = 'offer', now = new Date(), id = newId(),
     taxMode: TAX_MODES.includes(taxMode) ? taxMode : 'small-business', donationProject: asText(donationProject, 160),
     notes: asText(notes, 2000), validUntil: asText(validUntil, 10), dueDate: asText(dueDate, 10), serviceDate: asText(serviceDate, 10),
     sourceDocumentId: typeof sourceDocumentId === 'string' ? sourceDocumentId : null,
+    sourceProductId: typeof sourceProductId === 'string' ? sourceProductId : null,
   };
 }
 
@@ -53,6 +56,7 @@ export function cleanDocument(input) {
     donationProject: asText(input.donationProject, 160), notes: asText(input.notes, 2000),
     validUntil: asText(input.validUntil, 10), dueDate: asText(input.dueDate, 10), serviceDate: asText(input.serviceDate, 10),
     sourceDocumentId: typeof input.sourceDocumentId === 'string' ? input.sourceDocumentId : null,
+    sourceProductId: typeof input.sourceProductId === 'string' ? input.sourceProductId : null,
   };
 }
 
@@ -63,6 +67,24 @@ export function serializeDocumentExport(document, exportedAt = new Date().toISOS
 export function parseDocumentExport(input) {
   if (!input || input.format !== 'preisrechner-document' || input.version !== 1) return null;
   return cleanDocument(input.document);
+}
+
+export function createDocumentItemFromProduct(product, taxMode, defaultVatRate, type = 'invoice') {
+  const description = asText(product?.productName, 240);
+  const quantity = numberFromInput(product?.batchSize);
+  if (!description || !Number.isInteger(quantity) || quantity <= 0) return { item: null, error: 'Das gespeicherte Produkt braucht einen Namen und eine gültige Stückzahl.' };
+  if (type === 'delivery-note') return { item: { description, quantity, unitPrice: 0, vatRate: 0 }, error: '' };
+
+  const pricingProduct = structuredClone(product);
+  pricingProduct.vatPercent = taxMode === 'standard' ? String(defaultVatRate).replace('.', ',') : '0';
+  const result = calculate(pricingProduct);
+  const series = result.errors.length || result.batchCost === 0 ? null : calculateSeries(pricingProduct, [quantity])[0];
+  const recommended = series?.suggestions.find(suggestion => suggestion.kind === 'recommended');
+  if (!recommended) return { item: null, error: 'Für das gespeicherte Produkt ist kein Verkaufspreis verfügbar.' };
+  return {
+    item: { description, quantity, unitPrice: recommended.price, vatRate: taxMode === 'standard' ? Number(defaultVatRate) : 0 },
+    error: '',
+  };
 }
 
 export function calculateDocumentTotals(document) {
@@ -150,7 +172,7 @@ export function createInvoiceFromOffer(offer, now = new Date(), id = newId()) {
   if (offer?.type !== 'offer' || !['issued', 'accepted'].includes(offer.status)) throw new TypeError('Nur ein ausgestelltes oder angenommenes Angebot kann übernommen werden.');
   return createDocument({
     type: 'invoice', id, now, seller: offer.seller, customer: offer.customer, items: offer.items, taxMode: offer.taxMode,
-    donationProject: offer.donationProject, notes: offer.notes, serviceDate: offer.serviceDate, sourceDocumentId: offer.id,
+    donationProject: offer.donationProject, notes: offer.notes, serviceDate: offer.serviceDate, sourceDocumentId: offer.id, sourceProductId: offer.sourceProductId,
   });
 }
 
@@ -159,7 +181,7 @@ export function createDeliveryNoteFromDocument(source, now = new Date(), id = ne
   return createDocument({
     type: 'delivery-note', id, now, seller: source.seller, customer: source.customer,
     items: source.items.map(item => ({ description: item.description, quantity: item.quantity, unitPrice: 0, vatRate: 0 })),
-    donationProject: source.donationProject, notes: source.notes, serviceDate: source.serviceDate || now.toISOString().slice(0, 10), sourceDocumentId: source.id,
+    donationProject: source.donationProject, notes: source.notes, serviceDate: source.serviceDate || now.toISOString().slice(0, 10), sourceDocumentId: source.id, sourceProductId: source.sourceProductId,
   });
 }
 
@@ -167,7 +189,7 @@ export function createCancellationFromInvoice(invoice, now = new Date(), id = ne
   if (invoice?.type !== 'invoice' || !['issued', 'paid'].includes(invoice.status)) throw new TypeError('Nur eine ausgestellte Rechnung kann storniert werden.');
   return createDocument({
     type: 'cancellation', id, now, seller: invoice.seller, customer: invoice.customer, items: invoice.items,
-    taxMode: invoice.taxMode, notes: `Stornierung zu Rechnung ${invoice.number}`, serviceDate: invoice.serviceDate, sourceDocumentId: invoice.id,
+    taxMode: invoice.taxMode, notes: `Stornierung zu Rechnung ${invoice.number}`, serviceDate: invoice.serviceDate, sourceDocumentId: invoice.id, sourceProductId: invoice.sourceProductId,
   });
 }
 

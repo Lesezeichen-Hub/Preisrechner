@@ -2,7 +2,7 @@ import { calculate, calculateSeries, calculateDiscount, numberFromInput, stockMa
 import { loadState, saveState } from './storage.mjs';
 import { toCsv, parseCsv, inventoryToCsv } from './csv.mjs';
 import { mergeBackup } from './sync.mjs';
-import { calculateDocumentTotals, cleanBusinessProfile, cleanDocument, createCancellationFromInvoice, createDeliveryNoteFromDocument, createDocument, createInvoiceFromOffer, issueDocument, parseDocumentExport, recordPayment, roundMoney, serializeDocumentExport } from './documents.mjs';
+import { calculateDocumentTotals, cleanBusinessProfile, cleanDocument, createCancellationFromInvoice, createDeliveryNoteFromDocument, createDocument, createDocumentItemFromProduct, createInvoiceFromOffer, issueDocument, parseDocumentExport, recordPayment, roundMoney, serializeDocumentExport } from './documents.mjs';
 
 const euro = new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' });
 const percent = new Intl.NumberFormat('de-DE', { maximumFractionDigits: 1, minimumFractionDigits: 1 });
@@ -669,6 +669,7 @@ function createDocumentDraft(type) {
   if (type !== 'delivery-note' && !series?.suggestions[1]) { $('saveStatus').textContent = 'Für diese Kalkulation konnte kein Verkaufspreis ermittelt werden.'; return null; }
   return createDocument({
     type, seller: businessProfile, taxMode: businessProfile.taxMode, serviceDate: type === 'offer' ? '' : localDateValue(),
+    sourceProductId: draft.id,
     items: [{ description: pricingDraft.productName, quantity: result.batchSize, unitPrice: series?.suggestions[1]?.price || 0, vatRate: type !== 'delivery-note' && businessProfile.taxMode === 'standard' ? businessProfile.defaultVatRate : 0 }],
   });
 }
@@ -678,6 +679,17 @@ function documentItemHTML(item, index, readonly) {
   const isDeliveryNote = editingDocument.type === 'delivery-note';
   const taxDisabled = readonly || isDeliveryNote || editingDocument.taxMode !== 'standard' ? 'disabled' : '';
   return `<div class="document-item-editor ${isDeliveryNote ? 'delivery-note-item' : ''}" data-item-index="${index}"><label class="field">Bezeichnung<input data-item-field="description" value="${plain(item.description)}" maxlength="240" ${disabled}></label><label class="field">Menge<input data-item-field="quantity" inputmode="decimal" value="${plain(item.quantity)}" ${disabled}></label>${isDeliveryNote ? '' : `<label class="field">Preis je Stück <span class="unit-label">€</span><input data-item-field="unitPrice" inputmode="decimal" value="${plain(item.unitPrice)}" ${disabled}></label><label class="field">USt. <span class="unit-label">%</span><input data-item-field="vatRate" type="number" min="0" max="100" step="0.1" value="${plain(editingDocument.taxMode === 'standard' ? item.vatRate : 0)}" ${taxDisabled}></label>`}${readonly ? '' : `<button class="button small danger remove-document-item" type="button" aria-label="Position ${index + 1} entfernen">Entfernen</button>`}</div>`;
+}
+
+function renderSavedDocumentProducts(readonly) {
+  const options = saved.filter(entry => entry.id !== editingDocument.sourceProductId).map(entry => {
+    const result = createDocumentItemFromProduct(entry.product, editingDocument.taxMode, businessProfile.defaultVatRate, editingDocument.type);
+    return result.error ? null : { entry, item: result.item };
+  }).filter(Boolean).sort((left, right) => left.entry.product.productName.localeCompare(right.entry.product.productName, 'de'));
+  $('savedDocumentProduct').innerHTML = '<option value="">Produkt wählen</option>' + options.map(({ entry, item }) => `<option value="${plain(entry.id)}">${plain(item.description)} · ${quantityFormat.format(item.quantity)} Stück</option>`).join('');
+  $('savedDocumentProduct').disabled = readonly || options.length === 0;
+  $('addSavedDocumentProduct').disabled = readonly || options.length === 0;
+  $('savedDocumentProduct').closest('.saved-position-controls').hidden = readonly;
 }
 
 function renderDocumentEditor() {
@@ -694,6 +706,7 @@ function renderDocumentEditor() {
     field.disabled = readonly;
   });
   $('documentItems').innerHTML = editingDocument.items.map((item, index) => documentItemHTML(item, index, readonly)).join('');
+  renderSavedDocumentProducts(readonly);
   $('addDocumentItem').hidden = readonly;
   $('saveDocumentButton').hidden = readonly;
   $('issueDocumentButton').hidden = readonly;
@@ -809,6 +822,16 @@ for (const id of ['documentFilter', 'documentSearch']) $(id).addEventListener(id
 $('documentForm').addEventListener('input', event => { if (!editingDocument || editingDocument.status !== 'draft') return; readDocumentEditor(); renderDocumentPreview(); });
 $('documentForm').addEventListener('change', event => { if (!editingDocument || editingDocument.status !== 'draft') return; readDocumentEditor(); renderDocumentPreview(); });
 $('addDocumentItem').addEventListener('click', () => { if (!editingDocument || editingDocument.status !== 'draft') return; readDocumentEditor(); editingDocument.items.push({ description: '', quantity: 1, unitPrice: 0, vatRate: businessProfile.taxMode === 'standard' ? businessProfile.defaultVatRate : 0 }); renderDocumentEditor(); });
+$('addSavedDocumentProduct').addEventListener('click', () => {
+  if (!editingDocument || editingDocument.status !== 'draft') return;
+  const entry = saved.find(item => item.id === $('savedDocumentProduct').value);
+  if (!entry) return;
+  readDocumentEditor();
+  const result = createDocumentItemFromProduct(entry.product, editingDocument.taxMode, businessProfile.defaultVatRate, editingDocument.type);
+  if (!result.item) { showDocumentErrors([result.error]); return; }
+  editingDocument.items.push(result.item);
+  renderDocumentEditor();
+});
 $('documentItems').addEventListener('click', event => {
   const button = event.target.closest('.remove-document-item');
   if (!button || !editingDocument || editingDocument.status !== 'draft') return;

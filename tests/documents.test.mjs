@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { calculateDocumentTotals, cleanDocument, createCancellationFromInvoice, createDeliveryNoteFromDocument, createDocument, createInvoiceFromOffer, issueDocument, nextDocumentNumber, parseDocumentExport, recordPayment, serializeDocumentExport, validateDocumentForIssue } from '../documents.mjs';
+import { calculateDocumentTotals, cleanDocument, createCancellationFromInvoice, createDeliveryNoteFromDocument, createDocument, createDocumentItemFromProduct, createInvoiceFromOffer, issueDocument, nextDocumentNumber, parseDocumentExport, recordPayment, serializeDocumentExport, validateDocumentForIssue } from '../documents.mjs';
 
 const profile = { name: 'Werkstatt', street: 'Musterweg 1', postalCode: '12345', city: 'Musterstadt', identifier: '12/345/67890' };
 const item = { description: 'Holzfigur', quantity: 2, unitPrice: 119, vatRate: 19 };
@@ -57,6 +57,29 @@ test('individual document JSON roundtrip keeps the document and rejects unknown 
   assert.equal(imported.id, document.id);
   assert.equal(imported.donationProject, 'Kinderhospiz');
   assert.equal(parseDocumentExport({ format: 'other', version: 1, document }), null);
+});
+
+test('saved products create priced invoice items using the current tax profile', () => {
+  const product = { productName: 'Gespeicherte Schale', batchSize: '1', materials: [], extras: [], laborMinutes: '60', hourlyRate: '20', setupMinutes: '0', setupCost: '0', overheadPercent: '0', feePercent: '0', fixedFee: '0', vatPercent: '0', shippingCost: '0', packagingCost: '0', roundingMode: 'cent' };
+  const smallBusiness = createDocumentItemFromProduct(product, 'small-business', 19);
+  const standard = createDocumentItemFromProduct(product, 'standard', 19);
+  assert.equal(smallBusiness.item.vatRate, 0);
+  assert.equal(standard.item.vatRate, 19);
+  assert.ok(standard.item.unitPrice > smallBusiness.item.unitPrice);
+});
+
+test('saved products added to delivery notes carry quantity only, even without a price calculation', () => {
+  const product = { productName: 'Vorlage', batchSize: '3' };
+  const result = createDocumentItemFromProduct(product, 'standard', 19, 'delivery-note');
+  assert.deepEqual(result.item, { description: 'Vorlage', quantity: 3, unitPrice: 0, vatRate: 0 });
+  assert.equal(result.error, '');
+});
+
+test('source product identity is retained when a document is cloned from an offer', () => {
+  const offer = createDocument({ type: 'offer', id: 'offer-source', sourceProductId: 'product-current' });
+  offer.status = 'issued';
+  const invoice = createInvoiceFromOffer(offer);
+  assert.equal(invoice.sourceProductId, 'product-current');
 });
 
 test('delivery note carries donation project but has no prices or VAT and uses its own number series', () => {
