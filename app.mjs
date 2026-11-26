@@ -213,7 +213,7 @@ function renderSeries() {
   const custom = numberFromInput($('customSeriesQuantity').value);
   const sizes = [...new Set([1, 5, 10, 50, ...(Number.isInteger(custom) && custom > 0 ? [custom] : [])])].sort((a, b) => a - b);
   const rows = calculateSeries(draft, sizes);
-  $('seriesTable').innerHTML = rows.length && calculate(draft).batchCost > 0 ? `<table><thead><tr><th>Stück</th><th>Kosten je Stück</th><th>Kosten gesamt</th><th>Empfohlen je Stück</th><th>Umsatz bei Verkauf</th></tr></thead><tbody>${rows.map(row => `<tr><th>${row.quantity}</th><td>${money(row.unitCost)}</td><td>${money(row.batchCost)}</td><td>${money(row.suggestions[1].price)}</td><td>${money(row.suggestions[1].price * row.quantity)}</td></tr>`).join('')}</tbody></table>` : '<div class="empty-list">Gib zuerst gültige Kosten ein, damit die Serienpreise erscheinen.</div>';
+  $('seriesTable').innerHTML = rows.length && calculate(draft).batchCost > 0 ? `<table><thead><tr><th>Stück</th><th>Kosten je Stück</th><th>Kosten gesamt</th><th>Empfohlen je Stück</th><th>Umsatz bei Verkauf</th><th>Gewinn bei Verkauf</th></tr></thead><tbody>${rows.map(row => `<tr><th>${row.quantity}</th><td>${money(row.unitCost)}</td><td>${money(row.batchCost)}</td><td>${money(row.suggestions[1].price)}</td><td>${money(row.suggestions[1].price * row.quantity)}</td><td>${money(row.suggestions[1].profit * row.quantity)}</td></tr>`).join('')}</tbody></table>` : '<div class="empty-list">Gib zuerst gültige Kosten ein, damit die Serienpreise erscheinen.</div>';
 }
 
 function renderDiscount() {
