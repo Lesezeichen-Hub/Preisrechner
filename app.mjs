@@ -213,7 +213,9 @@ function renderSeries() {
   const custom = numberFromInput($('customSeriesQuantity').value);
   const sizes = [...new Set([1, 5, 10, 50, ...(Number.isInteger(custom) && custom > 0 ? [custom] : [])])].sort((a, b) => a - b);
   const rows = calculateSeries(draft, sizes);
-  $('seriesTable').innerHTML = rows.length && calculate(draft).batchCost > 0 ? `<table><thead><tr><th>Stück</th><th>Kosten je Stück</th><th>Kosten gesamt</th><th>Empfohlen je Stück</th><th>Umsatz bei Verkauf</th><th>Gewinn bei Verkauf</th></tr></thead><tbody>${rows.map(row => `<tr><th>${row.quantity}</th><td>${money(row.unitCost)}</td><td>${money(row.batchCost)}</td><td>${money(row.suggestions[1].price)}</td><td>${money(row.suggestions[1].price * row.quantity)}</td><td>${money(row.suggestions[1].profit * row.quantity)}</td></tr>`).join('')}</tbody></table>` : '<div class="empty-list">Gib zuerst gültige Kosten ein, damit die Serienpreise erscheinen.</div>';
+  const optionIndex = Number($('seriesPriceOption').value);
+  const optionNames = ['Mindestpreis', 'Empfohlener Preis', 'Premiumpreis'];
+  $('seriesTable').innerHTML = rows.length && calculate(draft).batchCost > 0 ? `<table><thead><tr><th>Stück</th><th>Kosten je Stück</th><th>Kosten gesamt</th><th>${optionNames[optionIndex]} je Stück</th><th>Umsatz bei Verkauf</th><th>Gewinn bei Verkauf</th></tr></thead><tbody>${rows.map(row => `<tr><th>${row.quantity}</th><td>${money(row.unitCost)}</td><td>${money(row.batchCost)}</td><td>${money(row.suggestions[optionIndex].price)}</td><td>${money(row.suggestions[optionIndex].price * row.quantity)}</td><td>${money(row.suggestions[optionIndex].profit * row.quantity)}</td></tr>`).join('')}</tbody></table>` : '<div class="empty-list">Gib zuerst gültige Kosten ein, damit die Serienpreise erscheinen.</div>';
 }
 
 function renderDiscount() {
@@ -253,6 +255,7 @@ $('salesChannel').addEventListener('change', event => {
 $('isTemplate').addEventListener('change', event => { draft.isTemplate = event.target.checked; schedulePersist(); });
 for (const key of ['librarySearch', 'libraryCategory', 'libraryKind']) $(key).addEventListener(key === 'librarySearch' ? 'input' : 'change', renderSaved);
 $('customSeriesQuantity').addEventListener('input', renderSeries);
+$('seriesPriceOption').addEventListener('change', renderSeries);
 for (const key of ['discountBasePrice', 'discountPercent']) $(key).addEventListener('input', renderDiscount);
 
 async function preparePhoto(file) {
